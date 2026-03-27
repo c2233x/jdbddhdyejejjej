@@ -5,6 +5,7 @@ local CoreGui = game:GetService("CoreGui")
 
 local LP = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local VIM = game:GetService("VirtualInputManager")
 
 -- === CONFIGURACIÓN MAESTRA V67 ===
 local Settings = {
@@ -23,12 +24,16 @@ local Settings = {
     ESP_Lines = false,
     ESP_Chams = false,
     VentajaEnabled = false,
+    VentajaTarget = "Cabeza", -- "Cabeza", "Torso", "Todo"
+    AutoShoot = false,
+    AutoShootDelay = 0.1,
     OffX = 0, OffY = 0, OffZ = -3.5
 }
 
 local CurrentTarget = nil
 local lns, nms, chams, fovLines = {}, {}, {}, {}
 local Running = true
+local lastShot = 0
 
 -- === LIMPIEZA ===
 local function removeVisuals(p)
@@ -113,7 +118,7 @@ local pgESP, pgAIM, pgADV = Instance.new("ScrollingFrame", container), Instance.
 
 local function setupPg(p, v)
     p.Size, p.Visible = UDim2.new(1, 0, 1, 0), v
-    p.BackgroundTransparency, p.CanvasSize, p.ScrollBarThickness = 1, UDim2.new(0,0,2.2,0), 0
+    p.BackgroundTransparency, p.CanvasSize, p.ScrollBarThickness = 1, UDim2.new(0,0,2.6,0), 0
     Instance.new("UIListLayout", p).Padding = UDim.new(0, 5)
 end
 setupPg(pgESP, true); setupPg(pgAIM, false); setupPg(pgADV, false)
@@ -181,6 +186,23 @@ createSlider("SUAVIDAD", 0, 10, "Smoothing", pgAIM)
 createSlider("RADIO FOV", 10, 800, "FOV", pgAIM)
 
 createToggle("ACTIVAR VENTAJA", "VentajaEnabled", pgADV)
+
+-- Botón especial para elegir parte a traer (3 opciones)
+local partBtn = Instance.new("TextButton", pgADV)
+partBtn.Size = UDim2.new(1, -5, 0, 38)
+partBtn.BackgroundColor3, partBtn.TextColor3, partBtn.Font = Color3.fromRGB(40, 40, 45), Color3.new(1,1,1), "GothamBold"
+local parts = {"Cabeza", "Torso", "Todo"}
+local pIdx = 1
+partBtn.MouseButton1Click:Connect(function()
+    pIdx = pIdx % #parts + 1
+    Settings.VentajaTarget = parts[pIdx]
+    partBtn.Text = "TRAER: " .. Settings.VentajaTarget
+end)
+partBtn.Text = "TRAER: " .. Settings.VentajaTarget
+Instance.new("UICorner", partBtn)
+
+createToggle("AUTO DISPARO", "AutoShoot", pgADV)
+createSlider("DELAY DISPARO", 0, 1, "AutoShootDelay", pgADV) -- Retraso entre tiros
 createSlider("OFF X", -10, 10, "OffX", pgADV)
 createSlider("OFF Y", -10, 10, "OffY", pgADV)
 createSlider("OFF Z", -10, 10, "OffZ", pgADV)
@@ -215,14 +237,11 @@ RunService.RenderStepped:Connect(function()
             local pos, onscreen = Camera:WorldToViewportPoint(part.Position)
             local mag = (part.Position - LP.Character.HumanoidRootPart.Position).Magnitude
             
-            -- LÓGICA TEAM CHECK REPARADA
             local isAlly = (p.Team == LP.Team) or (p.TeamColor == LP.TeamColor)
             local isEnemy = not Settings.TeamCheck or not isAlly
             
             if (isEnemy or Settings.ShowAliados) and mag <= Settings.MaxDistance then
-                -- Color: Si TeamCheck está OFF, todos son Rojos. Si está ON, aliados son Verdes.
                 local baseColor = (not Settings.TeamCheck) and Color3.new(1,0,0) or (isAlly and Color3.new(0,1,0) or Color3.new(1,0,0))
-                -- Si es el target actual, Amarillo
                 local color = (p == CurrentTarget) and Color3.new(1,1,0) or baseColor
 
                 if Settings.ESP_Names and onscreen then
@@ -240,7 +259,6 @@ RunService.RenderStepped:Connect(function()
                     chams[p].Adornee, chams[p].Enabled, chams[p].FillColor = char, true, color
                 elseif chams[p] then chams[p].Enabled = false end
 
-                -- SELECCIÓN POR PRIORIDAD
                 if isEnemy then
                     local sDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
                     if (Settings.Aim360Total or (onscreen and sDist <= Settings.FOV)) and isVisible(part, char) then
@@ -258,16 +276,50 @@ RunService.RenderStepped:Connect(function()
     CurrentTarget = potTarget
 
     if CurrentTarget and Settings.Aimbot then
+        local char = CurrentTarget.Character
         local lerpVal = Settings.Smoothing == 0 and 1 or (1 - (Settings.Smoothing/10))
-        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, CurrentTarget.Character[Settings.AimPart].Position), lerpVal)
+        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, char[Settings.AimPart].Position), lerpVal)
         
+        -- VENTAJA (BRING PART)
         if Settings.VentajaEnabled then
+            local function movePart(part)
+                if part and part:IsA("BasePart") then
+                    part.Anchored = true
+                    part.CanCollide = false
+                    part.CFrame = LP.Character.HumanoidRootPart.CFrame * CFrame.new(Settings.OffX, Settings.OffY, Settings.OffZ)
+                end
+            end
+
             pcall(function()
-                local h = CurrentTarget.Character.Head
-                h.Anchored, h.CanCollide = true, false
-                h.CFrame = LP.Character.HumanoidRootPart.CFrame * CFrame.new(Settings.OffX, Settings.OffY, Settings.OffZ)
+                if Settings.VentajaTarget == "Cabeza" then
+                    movePart(char:FindFirstChild("Head"))
+                elseif Settings.VentajaTarget == "Torso" then
+                    movePart(char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
+                elseif Settings.VentajaTarget == "Todo" then
+                    for _, v in pairs(char:GetChildren()) do
+                        movePart(v)
+                    end
+                end
             end)
         end
+
+             -- AUTO-DISPARO (Sin interferir con el movimiento)
+if Settings.AutoShoot then
+    if (tick() - lastShot) >= Settings.AutoShootDelay then
+        local char = CurrentTarget.Character
+        if isVisible(char[Settings.AimPart], char) then
+            pcall(function()
+                -- Enviamos la señal de "Click" o "Botón" directamente al sistema
+                -- Esto NO interfiere con el dedo que tienes en el Joystick
+                VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0) -- Presionar
+                task.wait(0.02)
+                VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0) -- Soltar
+            end)
+            lastShot = tick()
+        end
+    end
+end
+
+
     end
 end)
-
