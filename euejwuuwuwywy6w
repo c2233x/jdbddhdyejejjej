@@ -2,40 +2,45 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
+local VIM = game:GetService("VirtualInputManager")
 
 local LP = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-local VIM = game:GetService("VirtualInputManager")
 
--- === CONFIGURACIÓN MAESTRA V67 ===
+-- Limpieza de versiones anteriores
+if CoreGui:FindFirstChild("V67_Master_UI") then
+    CoreGui.V67_Master_UI:Destroy()
+end
+
+-- === CONFIGURACIÓN AIM/ESP (V67) ===
 local Settings = {
-    Aimbot = false,
-    Aim360Total = false,
-    VisibleCheck = false,
-    Priority = "Mira", -- "Mira" o "Distancia"
-    AimPart = "Head", 
-    TeamCheck = true,
-    ShowAliados = false,
-    ShowFOV = true,
-    FOV = 150,
-    Smoothing = 0,
-    MaxDistance = 2000,
-    ESP_Names = false,
-    ESP_Lines = false,
-    ESP_Chams = false,
-    VentajaEnabled = false,
-    VentajaTarget = "Cabeza", -- "Cabeza", "Torso", "Todo"
-    AutoShoot = false,
-    AutoShootDelay = 0.1,
+    Aimbot = false, Aim360Total = false, VisibleCheck = false,
+    Priority = "Mira", AimPart = "Head", TeamCheck = true,
+    ShowAliados = false, ShowFOV = true, FOV = 150,
+    Smoothing = 0, MaxDistance = 2000, ESP_Names = false,
+    ESP_Lines = false, ESP_Chams = false, VentajaEnabled = false,
+    VentajaTarget = "Cabeza", AutoShoot = false, AutoShootDelay = 0.1,
     OffX = 0, OffY = 0, OffZ = -3.5
 }
-
 local CurrentTarget = nil
 local lns, nms, chams, fovLines = {}, {}, {}, {}
 local Running = true
 local lastShot = 0
 
--- === LIMPIEZA ===
+-- === CONFIGURACIÓN SALA (V70) ===
+local targetPlayer = nil
+local bangActive, flingActive, spectateActive = false, false, false
+local lastPos = nil 
+local bangModes = {"ESPALDA", "CABEZA", "CABEZA ALTO", "PISO (ESPALDA)"}
+local flingModes = {"GHOST", "TORNADO", "MISIL", "DEBAJO"}
+local modeIndex, flingModeIndex = 1, 1
+local ignoreTeam = false
+local bangSpeed, bangTilt = 35, 35 
+local flingRot = 200000 
+
+local themeColor = Color3.fromRGB(0, 255, 150)
+
+-- === FUNCIONES DE LIMPIEZA ===
 local function removeVisuals(p)
     if lns[p] then pcall(function() lns[p]:Remove() end) lns[p] = nil end
     if nms[p] then pcall(function() nms[p]:Remove() end) nms[p] = nil end
@@ -48,7 +53,6 @@ local function cleanAll()
     for _, l in pairs(fovLines) do pcall(function() l:Remove() end) end
     for _, p in pairs(Players:GetPlayers()) do removeVisuals(p) end
 end
-
 Players.PlayerRemoving:Connect(removeVisuals)
 
 -- === DIBUJO FOV ===
@@ -72,159 +76,327 @@ local function updateFOVCircle()
     end
 end
 
--- === INTERFAZ MOBILE V67 ===
-local gui = Instance.new("ScreenGui", LP.PlayerGui)
-gui.Name = "V67_Master"; gui.ResetOnSpawn = false
+-- === INTERFAZ MOBILE ===
+local screen = Instance.new("ScreenGui", CoreGui)
+screen.Name = "V67_Master_UI"
 
-local frame = Instance.new("Frame", gui)
-frame.Size, frame.Position = UDim2.new(0, 380, 0, 350), UDim2.new(0.5, -190, 0.5, -175)
-frame.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-frame.Active, frame.Draggable = true, true
-Instance.new("UICorner", frame)
-Instance.new("UIStroke", frame).Color = Color3.fromRGB(0, 255, 150)
-
-local openBtn = Instance.new("TextButton", gui)
-openBtn.Size, openBtn.Position = UDim2.new(0, 50, 0, 50), UDim2.new(0, 15, 0.5, 0)
-openBtn.BackgroundColor3, openBtn.Text = Color3.fromRGB(0, 255, 150), "C"
-openBtn.TextColor3, openBtn.Font, openBtn.TextSize = Color3.new(0,0,0), "GothamBold", 25
-openBtn.Visible = false 
-openBtn.Active, openBtn.Draggable = true, true
+local openBtn = Instance.new("TextButton", screen)
+openBtn.Size = UDim2.new(0, 45, 0, 45); openBtn.Position = UDim2.new(0, 15, 0.5, 0)
+openBtn.BackgroundColor3 = themeColor; openBtn.Text = "c"; openBtn.TextColor3 = Color3.new(0,0,0)
+openBtn.Font = "GothamBold"; openBtn.TextSize = 12
+openBtn.Active = true; openBtn.Draggable = true
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(1, 0)
 
-local function toggleUI(state)
-    frame.Visible = state
-    openBtn.Visible = not state
-end
+local main = Instance.new("Frame", screen)
+main.Size = UDim2.new(0, 250, 0, 420); main.Position = UDim2.new(0.5, -125, 0.5, -210)
+main.BackgroundColor3 = Color3.fromRGB(15, 15, 15); main.BorderSizePixel = 2
+main.BorderColor3 = themeColor; main.Active = true; main.Draggable = true; main.Visible = false
 
-openBtn.MouseButton1Click:Connect(function() toggleUI(true) end)
+local header = Instance.new("Frame", main)
+header.Size = UDim2.new(1, 0, 0, 35); header.BackgroundColor3 = themeColor; header.BorderSizePixel = 0
+local title = Instance.new("TextLabel", header)
+title.Size = UDim2.new(1, 0, 1, 0); title.BackgroundTransparency = 1; title.Text = "c2233"
+title.TextColor3 = Color3.new(0,0,0); title.Font = "GothamBold"; title.TextSize = 13
 
-local closeX = Instance.new("TextButton", frame)
-closeX.Size, closeX.Position = UDim2.new(0, 30, 0, 30), UDim2.new(1, -35, 0, 5)
-closeX.BackgroundColor3, closeX.Text, closeX.TextColor3 = Color3.fromRGB(200, 50, 50), "X", Color3.new(1,1,1)
-Instance.new("UICorner", closeX)
-closeX.MouseButton1Click:Connect(function() toggleUI(false) end)
+openBtn.MouseButton1Click:Connect(function() main.Visible = not main.Visible end)
 
-local sidebar = Instance.new("Frame", frame)
-sidebar.Size, sidebar.Position = UDim2.new(0, 95, 1, -20), UDim2.new(0, 10, 0, 10)
-sidebar.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-Instance.new("UICorner", sidebar)
-Instance.new("UIListLayout", sidebar).Padding, Instance.new("UIListLayout", sidebar).HorizontalAlignment = UDim.new(0, 6), "Center"
+-- === BARRA DE CATEGORÍAS (PESTAÑAS) ===
+local tabBar = Instance.new("Frame", main)
+tabBar.Size = UDim2.new(1, 0, 0, 30); tabBar.Position = UDim2.new(0, 0, 0, 35)
+tabBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25); tabBar.BorderSizePixel = 0
 
-local container = Instance.new("Frame", frame)
-container.Size, container.Position = UDim2.new(1, -125, 1, -50), UDim2.new(0, 115, 0, 40)
-container.BackgroundTransparency = 1
+local tabLayout = Instance.new("UIListLayout", tabBar)
+tabLayout.FillDirection = Enum.FillDirection.Horizontal; tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-local pgESP, pgAIM, pgADV = Instance.new("ScrollingFrame", container), Instance.new("ScrollingFrame", container), Instance.new("ScrollingFrame", container)
+local pages = {}
+local tabs = {}
 
-local function setupPg(p, v)
-    p.Size, p.Visible = UDim2.new(1, 0, 1, 0), v
-    p.BackgroundTransparency, p.CanvasSize, p.ScrollBarThickness = 1, UDim2.new(0,0,2.6,0), 0
-    Instance.new("UIListLayout", p).Padding = UDim.new(0, 5)
-end
-setupPg(pgESP, true); setupPg(pgAIM, false); setupPg(pgADV, false)
-
-local function createCat(t, target)
-    local b = Instance.new("TextButton", sidebar)
-    b.Size, b.Text = UDim2.new(0.9, 0, 0, 40), t
-    b.BackgroundColor3, b.TextColor3, b.Font = Color3.fromRGB(25, 25, 30), Color3.new(1,1,1), "GothamBold"
-    Instance.new("UICorner", b)
-    b.MouseButton1Click:Connect(function()
-        pgESP.Visible, pgAIM.Visible, pgADV.Visible = (target == pgESP), (target == pgAIM), (target == pgADV)
-        for _, obj in pairs(sidebar:GetChildren()) do if obj:IsA("TextButton") and obj.Text ~= "KILL" then obj.BackgroundColor3 = Color3.fromRGB(25,25,30) obj.TextColor3 = Color3.new(1,1,1) end end
-        b.BackgroundColor3, b.TextColor3 = Color3.fromRGB(0, 255, 150), Color3.new(0,0,0)
+local function createPage(name)
+    local frame = Instance.new("ScrollingFrame", main)
+    frame.Size = UDim2.new(1, 0, 1, -65); frame.Position = UDim2.new(0, 0, 0, 65)
+    frame.BackgroundTransparency = 1; frame.BorderSizePixel = 0; frame.ScrollBarThickness = 3
+    frame.Visible = false
+    
+    local list = Instance.new("UIListLayout", frame); list.SortOrder = "LayoutOrder"
+    list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        frame.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 10)
     end)
-    return b
+    pages[name] = frame
+    return frame
 end
 
-createCat("ESP", pgESP).BackgroundColor3 = Color3.fromRGB(0, 255, 150)
-createCat("AIM", pgAIM); createCat("VENTAJA", pgADV)
-
--- HELPERS
-local function createToggle(t, v, p)
-    local b = Instance.new("TextButton", p) b.Size = UDim2.new(1, -5, 0, 38)
-    local function up() b.Text = t..": "..(Settings[v] and "ON" or "OFF") b.BackgroundColor3 = Settings[v] and Color3.fromRGB(0, 150, 100) or Color3.fromRGB(35, 35, 40) end
-    b.TextColor3, b.Font = Color3.new(1,1,1), "GothamBold"
-    b.MouseButton1Click:Connect(function() Settings[v] = not Settings[v] up() end) up() Instance.new("UICorner", b)
+local function createTabBtn(name)
+    local btn = Instance.new("TextButton", tabBar)
+    btn.Size = UDim2.new(0.25, 0, 1, 0); btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.Text = name; btn.TextColor3 = Color3.new(1,1,1); btn.Font = "GothamBold"
+    btn.TextSize = 10; btn.BorderSizePixel = 0
+    
+    btn.MouseButton1Click:Connect(function()
+        for tName, tBtn in pairs(tabs) do tBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25); tBtn.TextColor3 = Color3.new(1,1,1) end
+        for pName, pFrame in pairs(pages) do pFrame.Visible = false end
+        btn.BackgroundColor3 = themeColor; btn.TextColor3 = Color3.new(0,0,0)
+        pages[name].Visible = true
+    end)
+    tabs[name] = btn
+    return btn
 end
 
-local function createMode(t, v, o1, o2, p)
-    local b = Instance.new("TextButton", p) b.Size = UDim2.new(1, -5, 0, 38)
-    b.BackgroundColor3, b.TextColor3, b.Font = Color3.fromRGB(40, 40, 45), Color3.new(1,1,1), "GothamBold"
-    local function up() b.Text = t..": "..Settings[v] end
-    b.MouseButton1Click:Connect(function() Settings[v] = (Settings[v] == o1 and o2 or o1) up() end) up() Instance.new("UICorner", b)
-end
+-- Crear Pestañas y Páginas
+createPage("SALA"); createTabBtn("SALA")
+createPage("ESP"); createTabBtn("ESP")
+createPage("AIM"); createTabBtn("AIM")
+createPage("VENTAJA"); createTabBtn("VENTAJA")
 
-local function createSlider(t, min, max, v, p)
-    local c = Instance.new("Frame", p) c.Size = UDim2.new(1, -5, 0, 50) c.BackgroundTransparency = 1
-    local l = Instance.new("TextLabel", c) l.Size, l.TextColor3, l.Text = UDim2.new(1,0,0,20), Color3.new(1,1,1), t..": "..string.format("%.1f", Settings[v]) l.BackgroundTransparency = 1
-    local b = Instance.new("Frame", c) b.Size, b.Position, b.BackgroundColor3 = UDim2.new(0.9,0,0,4), UDim2.new(0.05,0,0,35), Color3.fromRGB(50,50,55)
-    local k = Instance.new("Frame", b) k.Size, k.BackgroundColor3 = UDim2.new(0,16,0,16), Color3.fromRGB(0, 255, 150) k.Position = UDim2.new(0,0,0.5,-8) Instance.new("UICorner", k)
-    b.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
-        local move = RunService.RenderStepped:Connect(function()
-            local pos = math.clamp((UIS:GetMouseLocation().X - b.AbsolutePosition.X) / b.AbsoluteSize.X, 0, 1)
-            k.Position = UDim2.new(pos, -8, 0.5, -8)
-            Settings[v] = min + (pos * (max - min)) l.Text = t..": "..string.format("%.1f", Settings[v])
+-- Página secundaria para opciones de jugador (SALA)
+local pgSalaOpts = createPage("SALA_OPTS")
+tabs["SALA_OPTS"] = Instance.new("TextButton") -- Falso tab para evitar errores
+
+-- Activar la primera pestaña por defecto
+tabs["SALA"].BackgroundColor3 = themeColor; tabs["SALA"].TextColor3 = Color3.new(0,0,0)
+pages["SALA"].Visible = true
+
+
+-- === COMPONENTES UI ===
+local function createRow(text, parent, isToggle, stateObj, stateKey, callback, hasArrow, underlined)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 35); btn.BackgroundColor3 = Color3.new(0,0,0)
+    btn.BackgroundTransparency = 0.7; btn.Text = ""; btn.BorderSizePixel = 0
+    if underlined then
+        local line = Instance.new("Frame", btn)
+        line.Size = UDim2.new(0.9, 0, 0, 1); line.Position = UDim2.new(0.05, 0, 1, -1)
+        line.BackgroundColor3 = themeColor; line.BackgroundTransparency = 0.4; line.BorderSizePixel = 0
+    end
+    local lbl = Instance.new("TextLabel", btn)
+    lbl.Size = UDim2.new(1, -45, 1, 0); lbl.Position = UDim2.new(0, 15, 0, 0)
+    lbl.BackgroundTransparency = 1; lbl.Text = text; lbl.TextColor3 = Color3.new(1,1,1)
+    lbl.Font = "Gotham"; lbl.TextSize = 11; lbl.TextXAlignment = "Left"
+    
+    if isToggle then
+        local st = Instance.new("TextLabel", btn)
+        st.Size = UDim2.new(0, 30, 1, 0); st.Position = UDim2.new(1, -40, 0, 0)
+        st.BackgroundTransparency = 1; st.Font = "GothamBold"; st.TextSize = 10
+        
+        local function updateVisuals()
+            -- CORRECCIÓN: Usar if/else en lugar de and/or para evitar falsos positivos
+            local state = false
+            if stateObj then
+                state = stateObj[stateKey]
+            else
+                state = stateKey
+            end
+            
+            st.Text = state and "ON" or "OFF"
+            -- CORRECCIÓN: Ahora marcará Rojo cuando esté en OFF
+            st.TextColor3 = state and themeColor or Color3.new(1, 0, 0)
+        end
+        updateVisuals()
+        
+        btn.MouseButton1Click:Connect(function() 
+            -- Alternar el estado correctamente
+            if stateObj then 
+                stateObj[stateKey] = not stateObj[stateKey] 
+            else 
+                stateKey = not stateKey 
+            end
+            
+            updateVisuals()
+            
+            -- Enviar el estado correcto al callback sin errores de lógica
+            if callback then 
+                if stateObj then
+                    callback(stateObj[stateKey])
+                else
+                    callback(stateKey)
+                end
+            end
         end)
-        UIS.InputEnded:Connect(function(e) if e.UserInputType == Enum.UserInputType.Touch or e.UserInputType == Enum.UserInputType.MouseButton1 then move:Disconnect() end end)
-    end end)
+    elseif hasArrow then
+        local a = Instance.new("TextLabel", btn)
+        a.Size = UDim2.new(0, 20, 1, 0); a.Position = UDim2.new(1, -25, 0, 0)
+        a.BackgroundTransparency = 1; a.Text = ">"; a.TextColor3 = themeColor
+        a.Font = "GothamBold"; a.TextSize = 14
+        if callback then btn.MouseButton1Click:Connect(callback) end
+    else
+        if callback then btn.MouseButton1Click:Connect(callback) end
+    end
+    return btn
 end
 
--- CONTROLES V67
-createToggle("ESP NOMBRES", "ESP_Names", pgESP)
-createToggle("ESP LINEAS", "ESP_Lines", pgESP)
-createToggle("ESP CHAMS", "ESP_Chams", pgESP)
-createToggle("MOSTRAR EQUIPO", "ShowAliados", pgESP)
-createSlider("DISTANCIA ESP", 100, 5000, "MaxDistance", pgESP)
 
-createToggle("ACTIVAR AIMBOT", "Aimbot", pgAIM)
-createToggle("TEAM CHECK", "TeamCheck", pgAIM)
-createMode("PRIORIDAD", "Priority", "Mira", "Distancia", pgAIM)
-createMode("OBJETIVO", "AimPart", "Head", "HumanoidRootPart", pgAIM)
-createToggle("MODO 360", "Aim360Total", pgAIM)
-createToggle("VISIBLE CHECK", "VisibleCheck", pgAIM)
-createSlider("SUAVIDAD", 0, 10, "Smoothing", pgAIM)
-createSlider("RADIO FOV", 10, 800, "FOV", pgAIM)
+local function createSlider(text, min, max, stateObj, stateKey, parent, isFloat, callback)
+    local f = Instance.new("Frame", parent)
+    f.Size = UDim2.new(1, 0, 0, 45); f.BackgroundTransparency = 1
+    local currentVal = stateObj and stateObj[stateKey] or stateKey
+    local valStr = isFloat and string.format("%.1f", currentVal) or tostring(math.floor(currentVal))
+    
+    local l = Instance.new("TextLabel", f)
+    l.Size = UDim2.new(1, -20, 0, 15); l.Position = UDim2.new(0, 15, 0, 5)
+    l.Text = text .. ": " .. valStr; l.TextColor3 = Color3.new(1,1,1)
+    l.BackgroundTransparency = 1; l.Font = "Gotham"; l.TextSize = 10; l.TextXAlignment = "Left"
+    
+    local b = Instance.new("Frame", f)
+    b.Size = UDim2.new(1, -30, 0, 6); b.Position = UDim2.new(0, 15, 0, 25)
+    b.BackgroundColor3 = Color3.fromRGB(40,40,40); b.BorderSizePixel = 0
+    local fill = Instance.new("Frame", b)
+    fill.Size = UDim2.new(math.clamp((currentVal-min)/(max-min), 0, 1), 0, 1, 0)
+    fill.BackgroundColor3 = themeColor; fill.BorderSizePixel = 0
+    
+    b.InputBegan:Connect(function(input) 
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local function update() 
+                local r = math.clamp((UIS:GetMouseLocation().X - b.AbsolutePosition.X) / b.AbsoluteSize.X, 0, 1)
+                fill.Size = UDim2.new(r, 0, 1, 0)
+                local v = min + (r * (max-min))
+                local finalVal = isFloat and v or math.floor(v)
+                if stateObj then stateObj[stateKey] = finalVal else stateKey = finalVal end
+                l.Text = text .. ": " .. (isFloat and string.format("%.1f", finalVal) or tostring(finalVal))
+                if callback then callback(finalVal) end
+            end
+            local con = UIS.InputChanged:Connect(function(i) 
+                if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then update() end 
+            end)
+            UIS.InputEnded:Connect(function(i) 
+                if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then con:Disconnect() end 
+            end)
+            update()
+        end 
+    end)
+end
 
-createToggle("ACTIVAR VENTAJA", "VentajaEnabled", pgADV)
+local function createSub(name, list, stateObj, stateKey, parent, callback)
+    local btn = createRow("⚙ "..name .. ": " .. (stateObj and stateObj[stateKey] or stateKey), parent, false, nil, nil, nil, true)
+    local con = Instance.new("Frame", parent)
+    con.Size = UDim2.new(1,0,0,0); con.BackgroundTransparency = 1; con.ClipsDescendants = true
+    Instance.new("UIListLayout", con)
+    btn.MouseButton1Click:Connect(function() con.Size = (con.Size.Y.Offset == 0) and UDim2.new(1,0,0,#list*32) or UDim2.new(1,0,0,0) end)
+    for i, m in ipairs(list) do
+        createRow("  ↳ "..m, con, false, nil, nil, function() 
+            if stateObj then stateObj[stateKey] = m else stateKey = m end
+            btn.TextLabel.Text = "⚙ "..name .. ": " .. m
+            con.Size = UDim2.new(1,0,0,0)
+            if callback then callback(i) end
+        end, false, true)
+    end
+end
 
--- Botón especial para elegir parte a traer (3 opciones)
-local partBtn = Instance.new("TextButton", pgADV)
-partBtn.Size = UDim2.new(1, -5, 0, 38)
-partBtn.BackgroundColor3, partBtn.TextColor3, partBtn.Font = Color3.fromRGB(40, 40, 45), Color3.new(1,1,1), "GothamBold"
-local parts = {"Cabeza", "Torso", "Todo"}
-local pIdx = 1
-partBtn.MouseButton1Click:Connect(function()
-    pIdx = pIdx % #parts + 1
-    Settings.VentajaTarget = parts[pIdx]
-    partBtn.Text = "TRAER: " .. Settings.VentajaTarget
-end)
-partBtn.Text = "TRAER: " .. Settings.VentajaTarget
-Instance.new("UICorner", partBtn)
+-- === LÓGICA DE SALA (V70) ===
+local function teleportToTarget()
+    if targetPlayer and targetPlayer.Character then
+        local tRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if tRoot and myRoot then myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3) end
+    end
+end
 
-createToggle("AUTO DISPARO", "AutoShoot", pgADV)
-createSlider("DELAY DISPARO", 0, 1, "AutoShootDelay", pgADV) -- Retraso entre tiros
-createSlider("OFF X", -10, 10, "OffX", pgADV)
-createSlider("OFF Y", -10, 10, "OffY", pgADV)
-createSlider("OFF Z", -10, 10, "OffZ", pgADV)
+local function stopAttack()
+    local char = LP.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChild("Humanoid")
+    flingActive, bangActive = false, false
+    if root and hum then
+        root.Anchored = true; hum.PlatformStand = true 
+        root.Velocity, root.RotVelocity = Vector3.zero, Vector3.zero
+        if root:FindFirstChild("FlingForce") then root.FlingForce:Destroy() end
+        if lastPos then for i=1,5 do root.CFrame = lastPos RunService.Heartbeat:Wait() end end
+        task.wait(0.1); hum.PlatformStand = false; root.Anchored = false
+    end
+    lastPos = nil
+end
 
-local dBtn = Instance.new("TextButton", sidebar)
-dBtn.Size, dBtn.Text, dBtn.BackgroundColor3 = UDim2.new(0.9, 0, 0, 35), "KILL", Color3.fromRGB(150,0,0)
-dBtn.TextColor3, dBtn.Font = Color3.new(1,1,1), "GothamBold"
-Instance.new("UICorner", dBtn)
-dBtn.MouseButton1Click:Connect(function() cleanAll() gui:Destroy() end)
+local function resetCamera()
+    spectateActive = false
+    local char = LP.Character
+    if char and char:FindFirstChild("Humanoid") then
+        Camera.CameraType = Enum.CameraType.Custom
+        Camera.CameraSubject = char.Humanoid
+    end
+end
 
--- === LÓGICA VISIBLE ===
+local function openTarget(p)
+    targetPlayer = p
+    pages["SALA"].Visible = false
+    pages["SALA_OPTS"].Visible = true
+    
+    for _, v in pairs(pages["SALA_OPTS"]:GetChildren()) do if not v:IsA("UIListLayout") then v:Destroy() end end
+    
+    createRow("<- VOLVER A SALA", pages["SALA_OPTS"], false, nil, nil, function() 
+        resetCamera(); stopAttack(); pages["SALA_OPTS"].Visible = false; pages["SALA"].Visible = true 
+    end, false, true).TextLabel.TextColor3 = themeColor
+    
+    createRow("Espectar", pages["SALA_OPTS"], true, nil, spectateActive, function(v) spectateActive = v if not v then resetCamera() end end)
+    createRow("Teletransportar", pages["SALA_OPTS"], false, nil, nil, teleportToTarget, true, true)
+    
+    createSub("Modo Fling", flingModes, nil, flingModes[flingModeIndex], pages["SALA_OPTS"], function(i) flingModeIndex = i end)
+    createRow("Activar Fling", pages["SALA_OPTS"], true, nil, flingActive, function(v) 
+        if v then lastPos = LP.Character.HumanoidRootPart.CFrame; flingActive, bangActive = true, false else stopAttack() end 
+    end)
+    createSlider("Fling Power", 1000, 500000, nil, flingRot, pages["SALA_OPTS"], false, function(v) flingRot = v end)
+    
+    createSub("Modo Bang", bangModes, nil, bangModes[modeIndex], pages["SALA_OPTS"], function(i) modeIndex = i end)
+    createRow("Activar Bang", pages["SALA_OPTS"], true, nil, bangActive, function(v) 
+        if v then bangActive, flingActive = true, false else stopAttack() end 
+    end)
+    createSlider("Bang Speed", 10, 100, nil, bangSpeed, pages["SALA_OPTS"], false, function(v) bangSpeed = v end)
+    createSlider("Bang Tilt", 0, 90, nil, bangTilt, pages["SALA_OPTS"], false, function(v) bangTilt = v end)
+end
+
+local function refreshPlayers()
+    for _, v in pairs(pages["SALA"]:GetChildren()) do if not v:IsA("UIListLayout") then v:Destroy() end end
+    createRow("Ignorar Equipo", pages["SALA"], true, nil, ignoreTeam, function(v) ignoreTeam = v; refreshPlayers() end)
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LP then
+            if ignoreTeam and p.TeamColor == LP.TeamColor then continue end
+            local btn = createRow(p.Name, pages["SALA"], false, nil, nil, function() openTarget(p) end, true, true)
+            local colorMark = Instance.new("Frame", btn)
+            colorMark.Size = UDim2.new(0, 6, 0, 6); colorMark.Position = UDim2.new(0, 5, 0.5, -3)
+            colorMark.BackgroundColor3 = p.TeamColor.Color; colorMark.BorderSizePixel = 0
+        end
+    end
+end
+Players.PlayerAdded:Connect(function() task.wait(0.5); refreshPlayers() end)
+Players.PlayerRemoving:Connect(refreshPlayers)
+refreshPlayers()
+
+-- === CONSTRUCCIÓN MENÚS ESP/AIM/VENTAJA ===
+createRow("ESP Nombres", pages["ESP"], true, Settings, "ESP_Names")
+createRow("ESP Lineas", pages["ESP"], true, Settings, "ESP_Lines")
+createRow("ESP Chams", pages["ESP"], true, Settings, "ESP_Chams")
+createRow("Mostrar Aliados", pages["ESP"], true, Settings, "ShowAliados")
+createSlider("Distancia Max ESP", 100, 5000, Settings, "MaxDistance", pages["ESP"], false)
+
+createRow("Activar Aimbot", pages["AIM"], true, Settings, "Aimbot")
+createRow("Mostrar FOV", pages["AIM"], true, Settings, "ShowFOV")
+createRow("Team Check", pages["AIM"], true, Settings, "TeamCheck")
+createRow("Visible Check", pages["AIM"], true, Settings, "VisibleCheck")
+createRow("Aim 360 Total", pages["AIM"], true, Settings, "Aim360Total")
+createSub("Prioridad", {"Mira", "Distancia"}, Settings, "Priority", pages["AIM"])
+createSub("Objetivo", {"Head", "HumanoidRootPart", "UpperTorso"}, Settings, "AimPart", pages["AIM"])
+createSlider("Radio FOV", 10, 800, Settings, "FOV", pages["AIM"], false)
+createSlider("Suavidad Aim", 0, 10, Settings, "Smoothing", pages["AIM"], false)
+
+createRow("Activar Ventaja", pages["VENTAJA"], true, Settings, "VentajaEnabled")
+createSub("Traer Parte", {"Cabeza", "Torso", "Todo"}, Settings, "VentajaTarget", pages["VENTAJA"])
+createRow("Auto Disparo", pages["VENTAJA"], true, Settings, "AutoShoot")
+createSlider("Delay Disparo", 0, 1, Settings, "AutoShootDelay", pages["VENTAJA"], true)
+createSlider("Offset X", -10, 10, Settings, "OffX", pages["VENTAJA"], true)
+createSlider("Offset Y", -10, 10, Settings, "OffY", pages["VENTAJA"], true)
+createSlider("Offset Z", -10, 10, Settings, "OffZ", pages["VENTAJA"], true)
+
+-- === LOOPS DE FÍSICA Y VISUALES ===
 local function isVisible(part, char)
     if not Settings.VisibleCheck then return true end
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {LP.Character, char}
-    local res = workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position), params)
-    return res == nil
+    local params = RaycastParams.new(); params.FilterType = Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances = {LP.Character, char}
+    return workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position), params) == nil
 end
 
--- === LOOP PRINCIPAL ===
 RunService.RenderStepped:Connect(function()
+    -- CÁMARA ESPECTAR (SALA)
+    if spectateActive and targetPlayer and targetPlayer.Character then
+        local tHum = targetPlayer.Character:FindFirstChild("Humanoid")
+        if tHum then Camera.CameraType = Enum.CameraType.Custom Camera.CameraSubject = tHum end
+    end
+    
+    -- LÓGICA AIM/ESP
     if not Running then return end
     updateFOVCircle()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
@@ -236,24 +408,19 @@ RunService.RenderStepped:Connect(function()
             local part = char[Settings.AimPart]
             local pos, onscreen = Camera:WorldToViewportPoint(part.Position)
             local mag = (part.Position - LP.Character.HumanoidRootPart.Position).Magnitude
-            
             local isAlly = (p.Team == LP.Team) or (p.TeamColor == LP.TeamColor)
             local isEnemy = not Settings.TeamCheck or not isAlly
             
             if (isEnemy or Settings.ShowAliados) and mag <= Settings.MaxDistance then
-                local baseColor = (not Settings.TeamCheck) and Color3.new(1,0,0) or (isAlly and Color3.new(0,1,0) or Color3.new(1,0,0))
-                local color = (p == CurrentTarget) and Color3.new(1,1,0) or baseColor
-
+                local color = (p == CurrentTarget) and Color3.new(1,1,0) or ((not Settings.TeamCheck) and Color3.new(1,0,0) or (isAlly and Color3.new(0,1,0) or Color3.new(1,0,0)))
                 if Settings.ESP_Names and onscreen then
                     if not nms[p] then nms[p] = Drawing.new("Text") nms[p].Center, nms[p].Outline = true, true end
                     nms[p].Visible, nms[p].Color, nms[p].Text, nms[p].Position = true, color, p.Name, Vector2.new(pos.X, pos.Y - 25)
                 elseif nms[p] then nms[p].Visible = false end
-
                 if Settings.ESP_Lines and onscreen then
                     if not lns[p] then lns[p] = Drawing.new("Line") end
                     lns[p].Visible, lns[p].Color, lns[p].From, lns[p].To = true, color, Vector2.new(center.X, Camera.ViewportSize.Y), Vector2.new(pos.X, pos.Y)
                 elseif lns[p] then lns[p].Visible = false end
-
                 if Settings.ESP_Chams then
                     if not chams[p] then chams[p] = Instance.new("Highlight", CoreGui) end
                     chams[p].Adornee, chams[p].Enabled, chams[p].FillColor = char, true, color
@@ -270,56 +437,51 @@ RunService.RenderStepped:Connect(function()
         else removeVisuals(p) end
     end
 
-    if CurrentTarget ~= potTarget and CurrentTarget then
-        pcall(function() CurrentTarget.Character.Head.Anchored = false end)
-    end
+    if CurrentTarget ~= potTarget and CurrentTarget then pcall(function() CurrentTarget.Character.Head.Anchored = false end) end
     CurrentTarget = potTarget
 
     if CurrentTarget and Settings.Aimbot then
         local char = CurrentTarget.Character
-        local lerpVal = Settings.Smoothing == 0 and 1 or (1 - (Settings.Smoothing/10))
-        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, char[Settings.AimPart].Position), lerpVal)
+        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, char[Settings.AimPart].Position), Settings.Smoothing == 0 and 1 or (1 - (Settings.Smoothing/10)))
         
-        -- VENTAJA (BRING PART)
         if Settings.VentajaEnabled then
-            local function movePart(part)
-                if part and part:IsA("BasePart") then
-                    part.Anchored = true
-                    part.CanCollide = false
-                    part.CFrame = LP.Character.HumanoidRootPart.CFrame * CFrame.new(Settings.OffX, Settings.OffY, Settings.OffZ)
-                end
-            end
-
-            pcall(function()
-                if Settings.VentajaTarget == "Cabeza" then
-                    movePart(char:FindFirstChild("Head"))
-                elseif Settings.VentajaTarget == "Torso" then
-                    movePart(char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
-                elseif Settings.VentajaTarget == "Todo" then
-                    for _, v in pairs(char:GetChildren()) do
-                        movePart(v)
-                    end
-                end
-            end)
+            local function movePart(part) if part and part:IsA("BasePart") then part.Anchored = true part.CanCollide = false part.CFrame = LP.Character.HumanoidRootPart.CFrame * CFrame.new(Settings.OffX, Settings.OffY, Settings.OffZ) end end
+            pcall(function() if Settings.VentajaTarget == "Cabeza" then movePart(char:FindFirstChild("Head")) elseif Settings.VentajaTarget == "Torso" then movePart(char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) elseif Settings.VentajaTarget == "Todo" then for _, v in pairs(char:GetChildren()) do movePart(v) end end end)
         end
-
-             -- AUTO-DISPARO (Sin interferir con el movimiento)
-if Settings.AutoShoot then
-    if (tick() - lastShot) >= Settings.AutoShootDelay then
-        local char = CurrentTarget.Character
-        if isVisible(char[Settings.AimPart], char) then
-            pcall(function()
-                -- Enviamos la señal de "Click" o "Botón" directamente al sistema
-                -- Esto NO interfiere con el dedo que tienes en el Joystick
-                VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0) -- Presionar
-                task.wait(0.02)
-                VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0) -- Soltar
-            end)
-            lastShot = tick()
+        if Settings.AutoShoot and (tick() - lastShot) >= Settings.AutoShootDelay then
+            if isVisible(char[Settings.AimPart], char) then
+                pcall(function() VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0) task.wait(0.02) VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
+                lastShot = tick()
+            end
         end
     end
-end
+end)
 
-
+RunService.Heartbeat:Connect(function()
+    -- LÓGICA FLING/BANG (SALA)
+    if not targetPlayer or not targetPlayer.Character then return end
+    local char, tChar = LP.Character, targetPlayer.Character
+    local root, tRoot = char and char:FindFirstChild("HumanoidRootPart"), tChar:FindFirstChild("HumanoidRootPart")
+    
+    if root and tRoot and not root.Anchored then
+        local t = tick()
+        if flingActive then
+            local bf = root:FindFirstChild("FlingForce") or Instance.new("BodyAngularVelocity", root)
+            bf.Name = "FlingForce"; bf.MaxTorque = Vector3.new(math.huge, math.huge, math.huge); bf.AngularVelocity = Vector3.new(0, flingRot, 0)
+            root.Velocity = Vector3.new(4500, 4500, 4500)
+            local fMode = flingModes[flingModeIndex]
+            if fMode == "GHOST" then root.CFrame = tRoot.CFrame * CFrame.new(math.sin(t*50)*1.5, 0, math.cos(t*50)*1.5)
+            elseif fMode == "TORNADO" then root.CFrame = tRoot.CFrame * CFrame.new(math.sin(t*30)*2.5, 2, math.cos(t*30)*2.5)
+            elseif fMode == "MISIL" then root.CFrame = tRoot.CFrame * CFrame.new(0, 0, math.sin(t*40)*3.5)
+            elseif fMode == "DEBAJO" then root.CFrame = tRoot.CFrame * CFrame.new(0, -3.8, 0) end
+        elseif bangActive then
+            root.Velocity = Vector3.zero
+            local sin = math.sin(t * bangSpeed)
+            local bMode, tilt = bangModes[modeIndex], CFrame.Angles(math.rad(sin * bangTilt), 0, 0)
+            if bMode == "ESPALDA" then root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 1.2 + (sin * 0.4)) * tilt
+            elseif bMode == "CABEZA" then local head = tChar:FindFirstChild("Head") if head then root.CFrame = CFrame.lookAt(head.Position + (head.CFrame.LookVector * 1.1), head.Position) * tilt end
+            elseif bMode == "CABEZA ALTO" then local head = tChar:FindFirstChild("Head") if head then root.CFrame = CFrame.lookAt(head.Position + (head.CFrame.LookVector * 1.1) + Vector3.new(0,1.5,0), head.Position) * tilt end
+            elseif bMode == "PISO (ESPALDA)" then root.CFrame = tRoot.CFrame * CFrame.new(0, -2.4, 1.2) * CFrame.Angles(math.rad(90), 0, 0) * tilt end
+        end
     end
 end)
