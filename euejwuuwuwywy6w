@@ -28,12 +28,23 @@ local Settings = {
     -- Extra (Movimiento)
     Fly = false, FlySpeed = 1.0, Noclip = false, 
     SpeedActive = false, WalkSpeedVal = 16, 
-    JumpActive = false, JumpPowerVal = 50
+    JumpActive = false, JumpPowerVal = 50,
+    
+    -- Variables para Auto-Fire Touch
+    TouchMode = "CLICK",
+    TouchX = 0,
+    TouchY = 0
 }
+
 local CurrentTarget = nil
 local lns, nms, chams, fovLines = {}, {}, {}, {}
 local Running = true
 local lastShot = 0
+
+-- Variables de estado Touch
+local selectingTouchPos = false
+local touchId = 25
+local isHolding = false
 
 -- === CONFIGURACIÓN SALA ===
 local targetPlayer = nil
@@ -56,7 +67,6 @@ local function removeVisuals(p)
     pcall(function() if p.Character and p.Character:FindFirstChild("Head") then p.Character.Head.Anchored = false end end)
 end
 
--- NUEVO FIX ESP: Ocultar en lugar de destruir para evitar lag/bugs
 local function hideVisuals(p)
     if lns[p] then lns[p].Visible = false end
     if nms[p] then nms[p].Visible = false end
@@ -142,7 +152,6 @@ end
 
 local function createTabBtn(name)
     local btn = Instance.new("TextButton", tabBar)
-    -- Ajustado a 0.2 para que quepan 5 pestañas exactas (100% / 5 = 20%)
     btn.Size = UDim2.new(0.2, 0, 1, 0); btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
     btn.Text = name; btn.TextColor3 = Color3.new(1,1,1); btn.Font = "GothamBold"
     btn.TextSize = 9; btn.BorderSizePixel = 0
@@ -157,25 +166,19 @@ local function createTabBtn(name)
     return btn
 end
 
--- Crear Pestañas y Páginas
 createPage("SALA"); createTabBtn("SALA")
 createPage("ESP"); createTabBtn("ESP")
 createPage("AIM"); createTabBtn("AIM")
 createPage("VENTAJA"); createTabBtn("VENTAJA")
-createPage("EXTRA"); createTabBtn("EXTRA") -- NUEVA PESTAÑA
+createPage("EXTRA"); createTabBtn("EXTRA")
 
 local pgSalaOpts = createPage("SALA_OPTS")
 tabs["SALA_OPTS"] = Instance.new("TextButton")
 
--- Activar SALA por defecto
 tabs["SALA"].BackgroundColor3 = themeColor; tabs["SALA"].TextColor3 = Color3.new(0,0,0)
 pages["SALA"].Visible = true
 
 -- === COMPONENTES UI ===
-
-
-
-
 local function createRow(text, parent, isToggle, stateObj, stateKey, callback, hasArrow, underlined)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, 0, 0, 35); btn.BackgroundColor3 = Color3.new(0,0,0)
@@ -195,9 +198,7 @@ local function createRow(text, parent, isToggle, stateObj, stateKey, callback, h
         st.Size = UDim2.new(0, 30, 1, 0); st.Position = UDim2.new(1, -40, 0, 0)
         st.BackgroundTransparency = 1; st.Font = "GothamBold"; st.TextSize = 10
         
-        -- Determinamos si el estado inicial es de una tabla o un valor directo
         local active = (stateObj and stateObj[stateKey]) or (not stateObj and stateKey) or false
-        
         local function updateVisuals(v)
             st.Text = v and "ON" or "OFF"
             st.TextColor3 = v and themeColor or Color3.fromRGB(255, 50, 50)
@@ -216,12 +217,10 @@ local function createRow(text, parent, isToggle, stateObj, stateKey, callback, h
     return btn
 end
 
-
 local function createSlider(text, min, max, stateObj, stateKey, parent, isFloat, callback)
     local f = Instance.new("Frame", parent)
     f.Size = UDim2.new(1, 0, 0, 45); f.BackgroundTransparency = 1
     
-    -- Obtener valor inicial
     local currentVal = stateObj and stateObj[stateKey] or (tonumber(stateKey) or min)
     
     local l = Instance.new("TextLabel", f)
@@ -238,7 +237,7 @@ local function createSlider(text, min, max, stateObj, stateKey, parent, isFloat,
     local function setVisual(val)
         local r = math.clamp((val - min) / (max - min), 0, 1)
         fill.Size = UDim2.new(r, 0, 1, 0)
-        l.Text = text .. ": " .. (isFloat and string.format("%.1f", val) or tostring(math.floor(val)))
+        l.Text = text .. ": " .. (isFloat and string.format("%.2f", val) or tostring(math.floor(val)))
     end
     setVisual(currentVal)
 
@@ -266,7 +265,6 @@ local function createSlider(text, min, max, stateObj, stateKey, parent, isFloat,
         end 
     end)
 end
-
 
 local function createSub(name, list, stateObj, stateKey, parent, callback)
     local btn = createRow("⚙ "..name .. ": " .. (stateObj and stateObj[stateKey] or stateKey), parent, false, nil, nil, nil, true)
@@ -362,7 +360,7 @@ Players.PlayerAdded:Connect(function() task.wait(0.5); refreshPlayers() end)
 Players.PlayerRemoving:Connect(refreshPlayers)
 refreshPlayers()
 
--- === CONSTRUCCIÓN MENÚS ESP/AIM/VENTAJA/EXTRA ===
+-- === CONSTRUCCIÓN MENÚS ===
 createRow("ESP Nombres", pages["ESP"], true, Settings, "ESP_Names")
 createRow("ESP Lineas", pages["ESP"], true, Settings, "ESP_Lines")
 createRow("ESP Chams", pages["ESP"], true, Settings, "ESP_Chams")
@@ -379,17 +377,38 @@ createSub("Objetivo", {"Head", "HumanoidRootPart", "UpperTorso"}, Settings, "Aim
 createSlider("Radio FOV", 10, 800, Settings, "FOV", pages["AIM"], false)
 createSlider("Suavidad Aim", 0, 10, Settings, "Smoothing", pages["AIM"], false)
 
--- VENTAJA (Solo Telekill y Ventaja original)
+-- VENTAJA (Auto Disparo y Posiciones integrados)
 createRow("Activar Ventaja", pages["VENTAJA"], true, Settings, "VentajaEnabled")
 createSub("Traer Parte", {"Cabeza", "Torso", "Todo"}, Settings, "VentajaTarget", pages["VENTAJA"])
-createRow("Auto Disparo", pages["VENTAJA"], true, Settings, "AutoShoot")
-createSlider("Delay Disparo", 0, 1, Settings, "AutoShootDelay", pages["VENTAJA"], true)
+
+-- NUEVO: Opciones Touch
+createRow("Auto Disparo (Touch)", pages["VENTAJA"], true, Settings, "AutoShoot")
+createSub("Modo Disparo", {"CLICK", "HOLD"}, Settings, "TouchMode", pages["VENTAJA"])
+createSlider("Delay/Velocidad", 0.01, 1, Settings, "AutoShootDelay", pages["VENTAJA"], true)
+
+local btnPos = createRow("Fijar Posición Disparo", pages["VENTAJA"], false, nil, nil, nil, true)
+btnPos.MouseButton1Click:Connect(function()
+    selectingTouchPos = true
+    btnPos.TextLabel.Text = "TOCA TU BOTÓN EN PANTALLA..."
+    btnPos.TextLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+end)
+
+-- Captura de la posición Touch para el menú
+UIS.InputBegan:Connect(function(input)
+    if selectingTouchPos and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+        Settings.TouchX, Settings.TouchY = input.Position.X, input.Position.Y
+        selectingTouchPos = false
+        btnPos.TextLabel.Text = "POSICIÓN FIJADA ✔"
+        btnPos.TextLabel.TextColor3 = themeColor
+    end
+end)
+
 createSlider("Offset X", -10, 10, Settings, "OffX", pages["VENTAJA"], true)
 createSlider("Offset Y", -10, 10, Settings, "OffY", pages["VENTAJA"], true)
 createSlider("Offset Z", -10, 10, Settings, "OffZ", pages["VENTAJA"], true)
 createRow("Telekill (Al Apuntado)", pages["VENTAJA"], true, Settings, "Telekill")
 
--- EXTRA (Movimiento Integrado)
+-- EXTRA
 createRow("Activar Fly", pages["EXTRA"], true, Settings, "Fly", function(v)
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum.PlatformStand = v if not v then hum:ChangeState(8) end end
@@ -413,7 +432,6 @@ createRow("Activar Jump", pages["EXTRA"], true, Settings, "JumpActive", function
     end
 end)
 createSlider("Jump Power", 50, 600, Settings, "JumpPowerVal", pages["EXTRA"], false)
-
 
 -- === VARIABLES AUXILIARES DE MOVIMIENTO ===
 local antiGrav = nil
@@ -453,25 +471,21 @@ RunService.RenderStepped:Connect(function()
             if (isEnemy or Settings.ShowAliados) and mag <= Settings.MaxDistance then
                 local color = (p == CurrentTarget) and Color3.new(1,1,0) or ((not Settings.TeamCheck) and Color3.new(1,0,0) or (isAlly and Color3.new(0,1,0) or Color3.new(1,0,0)))
                 
-                -- ESP NOMBRES
                 if Settings.ESP_Names and onscreen then
                     if not nms[p] then nms[p] = Drawing.new("Text") nms[p].Center, nms[p].Outline = true, true end
                     nms[p].Visible, nms[p].Color, nms[p].Text, nms[p].Position = true, color, p.Name, Vector2.new(pos.X, pos.Y - 25)
                 elseif nms[p] then nms[p].Visible = false end
                 
-                -- ESP LÍNEAS
                 if Settings.ESP_Lines and onscreen then
                     if not lns[p] then lns[p] = Drawing.new("Line") end
                     lns[p].Visible, lns[p].Color, lns[p].From, lns[p].To = true, color, Vector2.new(center.X, Camera.ViewportSize.Y), Vector2.new(pos.X, pos.Y)
                 elseif lns[p] then lns[p].Visible = false end
                 
-                -- ESP CHAMS
                 if Settings.ESP_Chams then
                     if not chams[p] then chams[p] = Instance.new("Highlight", CoreGui) end
                     chams[p].Adornee, chams[p].Enabled, chams[p].FillColor = char, true, color
                 elseif chams[p] then chams[p].Enabled = false end
 
-                -- DETECCIÓN AIMBOT
                 if isEnemy then
                     local sDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
                     if (Settings.Aim360Total or (onscreen and sDist <= Settings.FOV)) and isVisible(part, char) then
@@ -479,18 +493,14 @@ RunService.RenderStepped:Connect(function()
                         if val < lastVal then lastVal, potTarget = val, p end
                     end
                 end
-            else 
-                hideVisuals(p) -- FIX: Ocultar en lugar de destruir
-            end
-        else 
-            hideVisuals(p) -- FIX: Ocultar en lugar de destruir
-        end
+            else hideVisuals(p) end
+        else hideVisuals(p) end
     end
 
     if CurrentTarget ~= potTarget and CurrentTarget then pcall(function() CurrentTarget.Character.Head.Anchored = false end) end
     CurrentTarget = potTarget
 
-    -- AIMBOT (Corregido con CFrame.lookAt para más estabilidad)
+    -- AIMBOT Y AUTO DISPARO INTEGRADO
     if CurrentTarget and Settings.Aimbot then
         local char = CurrentTarget.Character
         local targetPos = char[Settings.AimPart].Position
@@ -501,11 +511,37 @@ RunService.RenderStepped:Connect(function()
             local function movePart(part) if part and part:IsA("BasePart") then part.Anchored = true part.CanCollide = false part.CFrame = LP.Character.HumanoidRootPart.CFrame * CFrame.new(Settings.OffX, Settings.OffY, Settings.OffZ) end end
             pcall(function() if Settings.VentajaTarget == "Cabeza" then movePart(char:FindFirstChild("Head")) elseif Settings.VentajaTarget == "Torso" then movePart(char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) elseif Settings.VentajaTarget == "Todo" then for _, v in pairs(char:GetChildren()) do movePart(v) end end end)
         end
-        if Settings.AutoShoot and (tick() - lastShot) >= Settings.AutoShootDelay then
-            if isVisible(char[Settings.AimPart], char) then
-                pcall(function() VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0) task.wait(0.02) VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0) end)
-                lastShot = tick()
+        
+        -- LÓGICA AUTO DISPARO CONDICIONADO AL OBJETIVO
+        local isTargetVisible = isVisible(char[Settings.AimPart], char)
+        if Settings.AutoShoot and Settings.TouchX > 0 and isTargetVisible then
+            if Settings.TouchMode == "CLICK" then
+                if (tick() - lastShot) >= Settings.AutoShootDelay then
+                    pcall(function() 
+                        VIM:SendTouchEvent(touchId, 0, Settings.TouchX, Settings.TouchY) 
+                        task.wait(0.03) 
+                        VIM:SendTouchEvent(touchId, 2, Settings.TouchX, Settings.TouchY) 
+                    end)
+                    lastShot = tick()
+                end
+            elseif Settings.TouchMode == "HOLD" then
+                if not isHolding then
+                    pcall(function() VIM:SendTouchEvent(touchId, 0, Settings.TouchX, Settings.TouchY) end)
+                    isHolding = true
+                end
             end
+        else
+            -- Soltar en caso de HOLD si el enemigo se oculta
+            if isHolding then
+                pcall(function() VIM:SendTouchEvent(touchId, 2, Settings.TouchX, Settings.TouchY) end)
+                isHolding = false
+            end
+        end
+    else
+        -- Soltar disparo en caso de perder el target por completo o apagar el aimbot
+        if isHolding then
+            pcall(function() VIM:SendTouchEvent(touchId, 2, Settings.TouchX, Settings.TouchY) end)
+            isHolding = false
         end
     end
     
@@ -515,11 +551,9 @@ RunService.RenderStepped:Connect(function()
     
     if root then
         if Settings.Telekill and CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("HumanoidRootPart") then
-            -- Si Telekill está encendido, pega a tu jugador al enemigo
             root.Velocity = Vector3.zero
             root.CFrame = CurrentTarget.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
         elseif Settings.Fly then
-            -- Solo vuela si no está haciendo Telekill
             if not antiGrav or antiGrav.Parent ~= root then
                 if antiGrav then antiGrav:Destroy() end
                 antiGrav = Instance.new("BodyForce")
