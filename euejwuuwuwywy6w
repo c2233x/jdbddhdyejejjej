@@ -630,7 +630,7 @@ RunService.Heartbeat:Connect(function()
             if bMode == "ESPALDA" then root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 1.2 + (sin * 0.4)) * tilt
             elseif bMode == "CABEZA" then local head = tChar:FindFirstChild("Head") if head then root.CFrame = CFrame.lookAt(head.Position + (head.CFrame.LookVector * 1.1), head.Position) * tilt end
             elseif bMode == "CABEZA ALTO" then local head = tChar:FindFirstChild("Head") if head then root.CFrame = CFrame.lookAt(head.Position + (head.CFrame.LookVector * 1.1) + Vector3.new(0,1.5,0), head.Position) * tilt end
-            elseif bMode == "PISO (ESPALDA)" then root.CFrame = tRoot.CFrame * CFrame.new(0, -2.4, 1.2) * CFrame.Angles(math.rad(90), 0, 0) * tilt end
+            elseif bMode == "PISO (ESPALDA)" then root.CFrame = tRoot.CFrame * CFrame.new(0, -1.3, 1.2) * CFrame.Angles(math.rad(90), 0, 0) * tilt end
         end
     end
 end)
