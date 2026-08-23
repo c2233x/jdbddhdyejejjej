@@ -1014,5 +1014,5 @@ end)
 
 task.spawn(function()
     task.wait(0.6)
-    showNotification("Master UI + Invis + Touch Fling Loaded")
+    showNotification("c2233")
 end) 
