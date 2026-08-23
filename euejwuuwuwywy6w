@@ -28,13 +28,14 @@ local Settings = {
     VentajaEnabled = false, VentajaTarget = "Cabeza", 
     AutoShoot = false, AutoShootDelay = 0.1,
     OffX = 0, OffY = 0, OffZ = -3.5, Telekill = false,
-    TouchFlingEnabled = false,
-    InvisibilityEnabled = false,
 
-    -- Extra (Movimiento)
+    -- Extra (Movimiento y Protección)
     Fly = false, FlySpeed = 1.0, Noclip = false, 
     SpeedActive = false, WalkSpeedVal = 16, 
     JumpActive = false, JumpPowerVal = 50,
+    TouchFlingEnabled = false,
+    InvisibilityEnabled = false,
+    AntiFling = false,
 
     -- Variables para Auto-Fire Touch
     TouchMode = "CLICK",
@@ -632,14 +633,7 @@ createSlider("Offset Y", -10, 10, Settings, "OffY", pages["VENTAJA"], true)
 createSlider("Offset Z", -10, 10, Settings, "OffZ", pages["VENTAJA"], true)
 createRow("Telekill (Al Apuntado)", pages["VENTAJA"], true, Settings, "Telekill")
 
-createRow("Touch Fling", pages["VENTAJA"], true, Settings, "TouchFlingEnabled", function(v)
-    TouchFlingSystem:Toggle(v)
-end)
-
-createRow("Invisibilidad (Clone)", pages["VENTAJA"], true, Settings, "InvisibilityEnabled", function(v)
-    InvisibilitySystem:Toggle(v)
-end)
-
+-- Pestaña EXTRA
 createRow("Activar Fly", pages["EXTRA"], true, Settings, "Fly", function(v)
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum.PlatformStand = v if not v then hum:ChangeState(8) end end
@@ -663,6 +657,17 @@ createRow("Activar Jump", pages["EXTRA"], true, Settings, "JumpActive", function
     end
 end)
 createSlider("Jump Power", 50, 600, Settings, "JumpPowerVal", pages["EXTRA"], false)
+
+-- Opciones movidas a EXTRA y Anti Fling
+createRow("Touch Fling", pages["EXTRA"], true, Settings, "TouchFlingEnabled", function(v)
+    TouchFlingSystem:Toggle(v)
+end)
+
+createRow("Invisibilidad (Clone)", pages["EXTRA"], true, Settings, "InvisibilityEnabled", function(v)
+    InvisibilitySystem:Toggle(v)
+end)
+
+createRow("Anti Fling", pages["EXTRA"], true, Settings, "AntiFling")
 
 local antiGrav = nil
 local function getMoveVector()
@@ -987,6 +992,19 @@ RunService.Stepped:Connect(function()
     local hum = char:FindFirstChildOfClass("Humanoid")
     local root = char:FindFirstChild("HumanoidRootPart")
 
+    -- Lógica de Anti Fling
+    if Settings.AntiFling then
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character then
+                for _, part in pairs(p.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end
+    end
+
     if Settings.Noclip then
         for _, part in pairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = false end end
     end
@@ -1048,5 +1066,4 @@ end)
 task.spawn(function()
     task.wait(0.6)
     showNotification("c2233")
-end)
-  
+end)  
