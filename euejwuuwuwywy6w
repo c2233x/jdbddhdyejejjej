@@ -822,4 +822,4 @@ RunService.Heartbeat:Connect(function()
             elseif bMode == "PISO (ESPALDA)" then root.CFrame = tRoot.CFrame * CFrame.new(0, -1.7, 1.2) * CFrame.Angles(math.rad(90), 0, 0) * tilt end
         end
     end
-end)
+end) 
