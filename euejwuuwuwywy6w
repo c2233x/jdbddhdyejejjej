@@ -11,6 +11,9 @@ local Camera = workspace.CurrentCamera
 if CoreGui:FindFirstChild("V67_Master_UI") then
     CoreGui.V67_Master_UI:Destroy()
 end
+if CoreGui:FindFirstChild("TouchFlingGui") then
+    CoreGui.TouchFlingGui:Destroy()
+end
 
 -- === CONFIGURACIÓN MAESTRA ===
 local Settings = {
@@ -25,6 +28,8 @@ local Settings = {
     VentajaEnabled = false, VentajaTarget = "Cabeza", 
     AutoShoot = false, AutoShootDelay = 0.1,
     OffX = 0, OffY = 0, OffZ = -3.5, Telekill = false,
+    TouchFlingEnabled = false,
+    InvisibilityEnabled = false,
 
     -- Extra (Movimiento)
     Fly = false, FlySpeed = 1.0, Noclip = false, 
@@ -61,6 +66,186 @@ local flingRot = 200000
 
 local themeColor = Color3.fromRGB(0, 255, 150)
 
+-- === NOTIFICACIÓN GENERAL ===
+local function showNotification(message, screenGuiParent)
+    local screenGui = screenGuiParent or CoreGui:FindFirstChild("V67_Master_UI")
+    if not screenGui then return end
+
+    local NotifFrame = Instance.new("Frame")
+    NotifFrame.Name = "Notification"
+    NotifFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    NotifFrame.BorderSizePixel = 0
+    NotifFrame.Position = UDim2.new(0.5, -110, 1, 10) 
+    NotifFrame.Size = UDim2.new(0, 220, 0, 40)
+    NotifFrame.Parent = screenGui
+
+    local NotifCorner = Instance.new("UICorner")
+    NotifCorner.CornerRadius = UDim.new(0, 8)
+    NotifCorner.Parent = NotifFrame
+
+    local NotifLabel = Instance.new("TextLabel")
+    NotifLabel.Size = UDim2.new(1, 0, 1, 0)
+    NotifLabel.BackgroundTransparency = 1
+    NotifLabel.Font = Enum.Font.GothamMedium
+    NotifLabel.Text = message
+    NotifLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    NotifLabel.TextSize = 12
+    NotifLabel.Parent = NotifFrame
+
+    NotifFrame:TweenPosition(UDim2.new(0.5, -110, 0.85, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.5, true)
+    
+    task.delay(4, function()
+        if NotifFrame and NotifFrame.Parent then
+            NotifFrame:TweenPosition(UDim2.new(0.5, -110, 1, 10), Enum.EasingDirection.In, Enum.EasingStyle.Quart, 0.5, true)
+            task.wait(0.5)
+            NotifFrame:Destroy()
+        end
+    end)
+end
+
+-- === SISTEMA TOUCH FLING ===
+local TouchFlingSystem = {Active = false, Connection = nil}
+
+function TouchFlingSystem:Start()
+    if self.Active then return end
+    self.Active = true
+    local movel = 0.1
+    
+    self.Connection = RunService.Heartbeat:Connect(function()
+        if not Settings.TouchFlingEnabled then self:Stop() return end
+        local character = LP.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        
+        if hrp then
+            local currentVel = hrp.Velocity
+            hrp.Velocity = currentVel * 10000 + Vector3.new(0, 10000, 0)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = currentVel
+            RunService.Stepped:Wait()
+            hrp.Velocity = currentVel + Vector3.new(0, movel, 0)
+            movel = -movel
+        end
+    end)
+end
+
+function TouchFlingSystem:Stop()
+    self.Active = false
+    if self.Connection then self.Connection:Disconnect(); self.Connection = nil end
+end
+
+function TouchFlingSystem:Toggle(state)
+    Settings.TouchFlingEnabled = state
+    if state then self:Start() else self:Stop() end
+end
+
+-- === SISTEMA INVISIBILITY (BitingTheDust Adapted) ===
+local InvisibilitySystem = {
+    FakeCharacter = nil,
+    RealCharacter = nil,
+    Part = nil,
+    PseudoAnchor = nil,
+    CanInvis = true,
+    IsInvisible = false,
+    Connections = {}
+}
+
+function InvisibilitySystem:Setup()
+    self.RealCharacter = LP.Character or LP.CharacterAdded:Wait()
+    self.RealCharacter.Archivable = true
+    self.FakeCharacter = self.RealCharacter:Clone()
+    
+    self.Part = Instance.new("Part", workspace)
+    self.Part.Anchored = true
+    self.Part.Size = Vector3.new(200, 1, 200)
+    self.Part.CFrame = CFrame.new(0, -500, 0)
+    self.Part.CanCollide = true
+    
+    self.FakeCharacter.Parent = workspace
+    if self.FakeCharacter:FindFirstChild("HumanoidRootPart") then
+        self.FakeCharacter.HumanoidRootPart.CFrame = self.Part.CFrame * CFrame.new(0, 5, 0)
+    end
+
+    for _, v in pairs(self.RealCharacter:GetChildren()) do
+        if v:IsA("LocalScript") then
+            local clone = v:Clone()
+            clone.Disabled = true
+            clone.Parent = self.FakeCharacter
+        end
+    end
+
+    -- Transparencia
+    for _, v in pairs(self.FakeCharacter:GetDescendants()) do
+        if v:IsA("BasePart") then v.Transparency = 0.7 end
+    end
+
+    self.PseudoAnchor = self.FakeCharacter:FindFirstChild("HumanoidRootPart")
+
+    -- Muerte
+    local hum = self.RealCharacter:FindFirstChildOfClass("Humanoid")
+    if hum then
+        table.insert(self.Connections, hum.Died:Connect(function()
+            if self.RealCharacter then self.RealCharacter:Destroy() end
+            if self.FakeCharacter then self.FakeCharacter:Destroy() end
+        end))
+    end
+end
+
+function InvisibilitySystem:Toggle(state)
+    Settings.InvisibilityEnabled = state
+    if state then
+        if not self.FakeCharacter or not self.FakeCharacter.Parent then
+            self:Setup()
+        end
+        if not self.IsInvisible and self.RealCharacter and self.FakeCharacter then
+            local rHrp = self.RealCharacter:FindFirstChild("HumanoidRootPart")
+            local fHrp = self.FakeCharacter:FindFirstChild("HumanoidRootPart")
+            local rHum = self.RealCharacter:FindFirstChildOfClass("Humanoid")
+            local fHum = self.FakeCharacter:FindFirstChildOfClass("Humanoid")
+
+            if rHrp and fHrp and rHum and fHum then
+                local StoredCF = rHrp.CFrame
+                rHrp.CFrame = fHrp.CFrame
+                fHrp.CFrame = StoredCF
+                rHum:UnequipTools()
+                LP.Character = self.FakeCharacter
+                Camera.CameraSubject = fHum
+                self.PseudoAnchor = rHrp
+                for _, v in pairs(self.FakeCharacter:GetChildren()) do
+                    if v:IsA("LocalScript") then v.Disabled = false end
+                end
+                self.IsInvisible = true
+            end
+        end
+    else
+        if self.IsInvisible and self.RealCharacter and self.FakeCharacter then
+            local rHrp = self.RealCharacter:FindFirstChild("HumanoidRootPart")
+            local fHrp = self.FakeCharacter:FindFirstChild("HumanoidRootPart")
+            local rHum = self.RealCharacter:FindFirstChildOfClass("Humanoid")
+            local fHum = self.FakeCharacter:FindFirstChildOfClass("Humanoid")
+
+            if rHrp and fHrp and rHum and fHum then
+                local StoredCF = fHrp.CFrame
+                fHrp.CFrame = rHrp.CFrame
+                rHrp.CFrame = StoredCF
+                fHum:UnequipTools()
+                LP.Character = self.RealCharacter
+                Camera.CameraSubject = rHum
+                self.PseudoAnchor = fHrp
+                for _, v in pairs(self.FakeCharacter:GetChildren()) do
+                    if v:IsA("LocalScript") then v.Disabled = true end
+                end
+                self.IsInvisible = false
+            end
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if InvisibilitySystem.PseudoAnchor and InvisibilitySystem.Part then
+        InvisibilitySystem.PseudoAnchor.CFrame = InvisibilitySystem.Part.CFrame * CFrame.new(0, 5, 0)
+    end
+end)
+
 -- === FUNCIONES DE LIMPIEZA Y VISUALES ===
 local function removeVisuals(p)
     if lns[p] then pcall(function() lns[p]:Destroy() end) lns[p] = nil end
@@ -81,11 +266,6 @@ local function hideVisuals(p)
     if healthTxts[p] then pcall(function() healthTxts[p].Visible = false end) end
 end
 
-local function cleanAll()
-    Running = false
-    if CoreGui:FindFirstChild("Native_ESP_UI") then CoreGui.Native_ESP_UI:Destroy() end
-    for _, p in pairs(Players:GetPlayers()) do removeVisuals(p) end
-end
 Players.PlayerRemoving:Connect(removeVisuals)
 
 -- === DIBUJO FOV Y ESP NATIVO ===
@@ -136,7 +316,7 @@ local header = Instance.new("Frame", main)
 header.Size = UDim2.new(1, 0, 0, 35); header.BackgroundColor3 = themeColor; header.BorderSizePixel = 0
 local title = Instance.new("TextLabel", header)
 title.Size = UDim2.new(1, 0, 1, 0); title.BackgroundTransparency = 1; title.Text = "c2233"
-title.TextColor3 = Color3.new(0,0,0); title.Font = "GothamBold"; title.TextSize = 13
+title.TextColor3 = Color3.new(0,0,0); title.Font = "GothamBold"; title.TextSize = 12
 
 openBtn.MouseButton1Click:Connect(function() main.Visible = not main.Visible end)
 
@@ -396,6 +576,7 @@ createSub("Objetivo", {"Head", "HumanoidRootPart", "UpperTorso"}, Settings, "Aim
 createSlider("Radio FOV", 10, 800, Settings, "FOV", pages["AIM"], false)
 createSlider("Suavidad Aim", 0, 10, Settings, "Smoothing", pages["AIM"], false)
 
+-- Pestaña VENTAJA (Incluye Telekill, Touch Fling e Invisibility)
 createRow("Activar Ventaja", pages["VENTAJA"], true, Settings, "VentajaEnabled")
 createSub("Traer Parte", {"Cabeza", "Torso", "Todo"}, Settings, "VentajaTarget", pages["VENTAJA"])
 
@@ -423,6 +604,15 @@ createSlider("Offset X", -10, 10, Settings, "OffX", pages["VENTAJA"], true)
 createSlider("Offset Y", -10, 10, Settings, "OffY", pages["VENTAJA"], true)
 createSlider("Offset Z", -10, 10, Settings, "OffZ", pages["VENTAJA"], true)
 createRow("Telekill (Al Apuntado)", pages["VENTAJA"], true, Settings, "Telekill")
+
+-- Nuevas adiciones integradas limpiamente en Ventaja:
+createRow("Touch Fling", pages["VENTAJA"], true, Settings, "TouchFlingEnabled", function(v)
+    TouchFlingSystem:Toggle(v)
+end)
+
+createRow("Invisibilidad (Clone)", pages["VENTAJA"], true, Settings, "InvisibilityEnabled", function(v)
+    InvisibilitySystem:Toggle(v)
+end)
 
 createRow("Activar Fly", pages["EXTRA"], true, Settings, "Fly", function(v)
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
@@ -487,7 +677,6 @@ RunService.RenderStepped:Connect(function()
             if (isEnemy or Settings.ShowAliados) and mag <= Settings.MaxDistance then
                 local color = (p == CurrentTarget) and Color3.new(1,1,0) or ((not Settings.TeamCheck) and Color3.new(1,0,0) or (isAlly and Color3.new(0,1,0) or Color3.new(1,0,0)))
 
-                -- GESTIÓN SEGURA DE HIGHLIGHT (Destruye al apagar para evitar bucles de Delta)
                 if Settings.ESP_Highlight then
                     if not highlightsTbl[p] or not highlightsTbl[p].Parent then
                         pcall(function()
@@ -514,7 +703,6 @@ RunService.RenderStepped:Connect(function()
                     end
                 end
 
-                -- GESTIÓN SEGURA DE CHAMS (Destruye al apagar para evitar bloqueos)
                 if Settings.ESP_Chams then
                     if not chamsTbl[p] or not chamsTbl[p].Parent then
                         pcall(function()
@@ -822,4 +1010,9 @@ RunService.Heartbeat:Connect(function()
             elseif bMode == "PISO (ESPALDA)" then root.CFrame = tRoot.CFrame * CFrame.new(0, -1.7, 1.2) * CFrame.Angles(math.rad(90), 0, 0) * tilt end
         end
     end
+end)
+
+task.spawn(function()
+    task.wait(0.6)
+    showNotification("Master UI + Invis + Touch Fling Loaded")
 end) 
