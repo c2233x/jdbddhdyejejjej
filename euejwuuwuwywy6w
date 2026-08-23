@@ -19,17 +19,18 @@ local Settings = {
     ShowAliados = false, ShowFOV = true, FOV = 150,
     Smoothing = 0, MaxDistance = 2000, ESP_Names = false,
     ESP_Lines = false, ESP_Chams = false, 
-    
+    ESP_Highlight = false, ESP_Distance = false, ESP_Health = false,
+
     -- Ventaja
     VentajaEnabled = false, VentajaTarget = "Cabeza", 
     AutoShoot = false, AutoShootDelay = 0.1,
     OffX = 0, OffY = 0, OffZ = -3.5, Telekill = false,
-    
+
     -- Extra (Movimiento)
     Fly = false, FlySpeed = 1.0, Noclip = false, 
     SpeedActive = false, WalkSpeedVal = 16, 
     JumpActive = false, JumpPowerVal = 50,
-    
+
     -- Variables para Auto-Fire Touch
     TouchMode = "CLICK",
     TouchX = 0,
@@ -37,7 +38,8 @@ local Settings = {
 }
 
 local CurrentTarget = nil
-local lns, nms, chams, fovLines = {}, {}, {}, {}
+local lns, nms, chamsTbl, highlightsTbl, distLbls = {}, {}, {}, {}, {} 
+local healthBgs, healthFills, healthTxts = {}, {}, {} 
 local Running = true
 local lastShot = 0
 
@@ -61,43 +63,56 @@ local themeColor = Color3.fromRGB(0, 255, 150)
 
 -- === FUNCIONES DE LIMPIEZA Y VISUALES ===
 local function removeVisuals(p)
-    if lns[p] then pcall(function() lns[p]:Remove() end) lns[p] = nil end
-    if nms[p] then pcall(function() nms[p]:Remove() end) nms[p] = nil end
-    if chams[p] then pcall(function() chams[p]:Destroy() end) chams[p] = nil end
+    if lns[p] then pcall(function() lns[p]:Destroy() end) lns[p] = nil end
+    if nms[p] then pcall(function() nms[p]:Destroy() end) nms[p] = nil end
+    if chamsTbl[p] then pcall(function() chamsTbl[p]:Destroy() end) chamsTbl[p] = nil end
+    if highlightsTbl[p] then pcall(function() highlightsTbl[p]:Destroy() end) highlightsTbl[p] = nil end
+    if distLbls[p] then pcall(function() distLbls[p]:Destroy() end) distLbls[p] = nil end
+    if healthBgs[p] then pcall(function() healthBgs[p]:Destroy() end) healthBgs[p] = nil end
+    if healthTxts[p] then pcall(function() healthTxts[p]:Destroy() end) healthTxts[p] = nil end
     pcall(function() if p.Character and p.Character:FindFirstChild("Head") then p.Character.Head.Anchored = false end end)
 end
 
 local function hideVisuals(p)
-    if lns[p] then lns[p].Visible = false end
-    if nms[p] then nms[p].Visible = false end
-    if chams[p] then chams[p].Enabled = false end
+    if lns[p] then pcall(function() lns[p].Visible = false end) end
+    if nms[p] then pcall(function() nms[p].Visible = false end) end
+    if distLbls[p] then pcall(function() distLbls[p].Visible = false end) end
+    if healthBgs[p] then pcall(function() healthBgs[p].Visible = false end) end
+    if healthTxts[p] then pcall(function() healthTxts[p].Visible = false end) end
 end
 
 local function cleanAll()
     Running = false
-    for _, l in pairs(fovLines) do pcall(function() l:Remove() end) end
+    if CoreGui:FindFirstChild("Native_ESP_UI") then CoreGui.Native_ESP_UI:Destroy() end
     for _, p in pairs(Players:GetPlayers()) do removeVisuals(p) end
 end
 Players.PlayerRemoving:Connect(removeVisuals)
 
--- === DIBUJO FOV ===
-for i = 1, 36 do
-    local l = Drawing.new("Line")
-    l.Thickness, l.Transparency, l.Visible = 2, 1, false
-    fovLines[i] = l
-end
+-- === DIBUJO FOV Y ESP NATIVO ===
+if CoreGui:FindFirstChild("Native_ESP_UI") then CoreGui.Native_ESP_UI:Destroy() end
+local espGui = Instance.new("ScreenGui", CoreGui)
+espGui.Name = "Native_ESP_UI"
+espGui.IgnoreGuiInset = true
+
+local fovCircle = Instance.new("Frame", espGui)
+fovCircle.BackgroundTransparency = 1
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+fovCircle.Visible = false
+local fovStroke = Instance.new("UIStroke", fovCircle)
+fovStroke.Thickness = 1.5
+fovStroke.Color = Color3.new(1,1,1)
+Instance.new("UICorner", fovCircle).CornerRadius = UDim.new(1, 0)
 
 local function updateFOVCircle()
+    if not Camera then return end
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    for i = 1, 36 do
-        local l = fovLines[i]
-        if Settings.ShowFOV and Settings.Aimbot and not Settings.Aim360Total and Running then
-            local a1, a2 = math.rad((i-1)*10), math.rad(i*10)
-            l.From = center + Vector2.new(math.cos(a1)*Settings.FOV, math.sin(a1)*Settings.FOV)
-            l.To = center + Vector2.new(math.cos(a2)*Settings.FOV, math.sin(a2)*Settings.FOV)
-            l.Color = CurrentTarget and Color3.new(1,1,0) or Color3.new(1,1,1)
-            l.Visible = true
-        else l.Visible = false end
+    if Settings.ShowFOV and Settings.Aimbot and not Settings.Aim360Total and Running then
+        fovCircle.Size = UDim2.new(0, Settings.FOV * 2, 0, Settings.FOV * 2)
+        fovCircle.Position = UDim2.new(0, center.X, 0, center.Y)
+        fovCircle.Visible = true
+        fovStroke.Color = CurrentTarget and Color3.new(1,1,0) or Color3.new(1,1,1)
+    else 
+        fovCircle.Visible = false 
     end
 end
 
@@ -141,7 +156,7 @@ local function createPage(name)
     frame.Size = UDim2.new(1, 0, 1, -65); frame.Position = UDim2.new(0, 0, 0, 65)
     frame.BackgroundTransparency = 1; frame.BorderSizePixel = 0; frame.ScrollBarThickness = 3
     frame.Visible = false
-    
+
     local list = Instance.new("UIListLayout", frame); list.SortOrder = "LayoutOrder"
     list:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         frame.CanvasSize = UDim2.new(0, 0, 0, list.AbsoluteContentSize.Y + 10)
@@ -155,7 +170,7 @@ local function createTabBtn(name)
     btn.Size = UDim2.new(0.2, 0, 1, 0); btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
     btn.Text = name; btn.TextColor3 = Color3.new(1,1,1); btn.Font = "GothamBold"
     btn.TextSize = 9; btn.BorderSizePixel = 0
-    
+
     btn.MouseButton1Click:Connect(function()
         for tName, tBtn in pairs(tabs) do tBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25); tBtn.TextColor3 = Color3.new(1,1,1) end
         for pName, pFrame in pairs(pages) do pFrame.Visible = false end
@@ -192,19 +207,19 @@ local function createRow(text, parent, isToggle, stateObj, stateKey, callback, h
     lbl.Size = UDim2.new(1, -45, 1, 0); lbl.Position = UDim2.new(0, 15, 0, 0)
     lbl.BackgroundTransparency = 1; lbl.Text = text; lbl.TextColor3 = Color3.new(1,1,1)
     lbl.Font = "Gotham"; lbl.TextSize = 11; lbl.TextXAlignment = "Left"
-    
+
     if isToggle then
         local st = Instance.new("TextLabel", btn)
         st.Size = UDim2.new(0, 30, 1, 0); st.Position = UDim2.new(1, -40, 0, 0)
         st.BackgroundTransparency = 1; st.Font = "GothamBold"; st.TextSize = 10
-        
+
         local active = (stateObj and stateObj[stateKey]) or (not stateObj and stateKey) or false
         local function updateVisuals(v)
             st.Text = v and "ON" or "OFF"
             st.TextColor3 = v and themeColor or Color3.fromRGB(255, 50, 50)
         end
         updateVisuals(active)
-        
+
         btn.MouseButton1Click:Connect(function() 
             active = not active
             if stateObj then stateObj[stateKey] = active end
@@ -220,20 +235,20 @@ end
 local function createSlider(text, min, max, stateObj, stateKey, parent, isFloat, callback)
     local f = Instance.new("Frame", parent)
     f.Size = UDim2.new(1, 0, 0, 45); f.BackgroundTransparency = 1
-    
+
     local currentVal = stateObj and stateObj[stateKey] or (tonumber(stateKey) or min)
-    
+
     local l = Instance.new("TextLabel", f)
     l.Size = UDim2.new(1, -20, 0, 15); l.Position = UDim2.new(0, 15, 0, 5)
     l.TextColor3 = Color3.new(1,1,1); l.BackgroundTransparency = 1; l.Font = "Gotham"; l.TextSize = 10; l.TextXAlignment = "Left"
-    
+
     local b = Instance.new("Frame", f)
     b.Size = UDim2.new(1, -30, 0, 6); b.Position = UDim2.new(0, 15, 0, 25)
     b.BackgroundColor3 = Color3.fromRGB(40,40,40); b.BorderSizePixel = 0
-    
+
     local fill = Instance.new("Frame", b)
     fill.BackgroundColor3 = themeColor; fill.BorderSizePixel = 0
-    
+
     local function setVisual(val)
         local r = math.clamp((val - min) / (max - min), 0, 1)
         fill.Size = UDim2.new(r, 0, 1, 0)
@@ -248,7 +263,7 @@ local function createSlider(text, min, max, stateObj, stateKey, parent, isFloat,
                 local r = math.clamp((mPos.X - b.AbsolutePosition.X) / b.AbsoluteSize.X, 0, 1)
                 local v = min + (r * (max - min))
                 local final = isFloat and v or math.floor(v)
-                
+
                 if stateObj then stateObj[stateKey] = final end
                 setVisual(final)
                 if callback then callback(final) end
@@ -319,22 +334,22 @@ local function openTarget(p)
     targetPlayer = p
     pages["SALA"].Visible = false
     pages["SALA_OPTS"].Visible = true
-    
+
     for _, v in pairs(pages["SALA_OPTS"]:GetChildren()) do if not v:IsA("UIListLayout") then v:Destroy() end end
-    
+
     createRow("<- VOLVER A SALA", pages["SALA_OPTS"], false, nil, nil, function() 
         resetCamera(); stopAttack(); pages["SALA_OPTS"].Visible = false; pages["SALA"].Visible = true 
     end, false, true).TextLabel.TextColor3 = themeColor
-    
+
     createRow("Espectar", pages["SALA_OPTS"], true, nil, spectateActive, function(v) spectateActive = v if not v then resetCamera() end end)
     createRow("Teletransportar", pages["SALA_OPTS"], false, nil, nil, teleportToTarget, true, true)
-    
+
     createSub("Modo Fling", flingModes, nil, flingModes[flingModeIndex], pages["SALA_OPTS"], function(i) flingModeIndex = i end)
     createRow("Activar Fling", pages["SALA_OPTS"], true, nil, flingActive, function(v) 
         if v then lastPos = LP.Character.HumanoidRootPart.CFrame; flingActive, bangActive = true, false else stopAttack() end 
     end)
     createSlider("Fling Power", 1000, 500000, nil, flingRot, pages["SALA_OPTS"], false, function(v) flingRot = v end)
-    
+
     createSub("Modo Bang", bangModes, nil, bangModes[modeIndex], pages["SALA_OPTS"], function(i) modeIndex = i end)
     createRow("Activar Bang", pages["SALA_OPTS"], true, nil, bangActive, function(v) 
         if v then bangActive, flingActive = true, false else stopAttack() end 
@@ -364,6 +379,10 @@ refreshPlayers()
 createRow("ESP Nombres", pages["ESP"], true, Settings, "ESP_Names")
 createRow("ESP Lineas", pages["ESP"], true, Settings, "ESP_Lines")
 createRow("ESP Chams", pages["ESP"], true, Settings, "ESP_Chams")
+createRow("ESP Highlight", pages["ESP"], true, Settings, "ESP_Highlight")
+createRow("ESP Metros", pages["ESP"], true, Settings, "ESP_Distance")
+createRow("ESP Vida", pages["ESP"], true, Settings, "ESP_Health")
+
 createRow("Mostrar Aliados", pages["ESP"], true, Settings, "ShowAliados")
 createSlider("Distancia Max ESP", 100, 5000, Settings, "MaxDistance", pages["ESP"], false)
 
@@ -377,11 +396,9 @@ createSub("Objetivo", {"Head", "HumanoidRootPart", "UpperTorso"}, Settings, "Aim
 createSlider("Radio FOV", 10, 800, Settings, "FOV", pages["AIM"], false)
 createSlider("Suavidad Aim", 0, 10, Settings, "Smoothing", pages["AIM"], false)
 
--- VENTAJA (Auto Disparo y Posiciones integrados)
 createRow("Activar Ventaja", pages["VENTAJA"], true, Settings, "VentajaEnabled")
 createSub("Traer Parte", {"Cabeza", "Torso", "Todo"}, Settings, "VentajaTarget", pages["VENTAJA"])
 
--- NUEVO: Opciones Touch
 createRow("Auto Disparo (Touch)", pages["VENTAJA"], true, Settings, "AutoShoot")
 createSub("Modo Disparo", {"CLICK", "HOLD"}, Settings, "TouchMode", pages["VENTAJA"])
 createSlider("Delay/Velocidad", 0.01, 1, Settings, "AutoShootDelay", pages["VENTAJA"], true)
@@ -393,7 +410,6 @@ btnPos.MouseButton1Click:Connect(function()
     btnPos.TextLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 end)
 
--- Captura de la posición Touch para el menú
 UIS.InputBegan:Connect(function(input)
     if selectingTouchPos and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
         Settings.TouchX, Settings.TouchY = input.Position.X, input.Position.Y
@@ -408,7 +424,6 @@ createSlider("Offset Y", -10, 10, Settings, "OffY", pages["VENTAJA"], true)
 createSlider("Offset Z", -10, 10, Settings, "OffZ", pages["VENTAJA"], true)
 createRow("Telekill (Al Apuntado)", pages["VENTAJA"], true, Settings, "Telekill")
 
--- EXTRA
 createRow("Activar Fly", pages["EXTRA"], true, Settings, "Fly", function(v)
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum.PlatformStand = v if not v then hum:ChangeState(8) end end
@@ -433,7 +448,6 @@ createRow("Activar Jump", pages["EXTRA"], true, Settings, "JumpActive", function
 end)
 createSlider("Jump Power", 50, 600, Settings, "JumpPowerVal", pages["EXTRA"], false)
 
--- === VARIABLES AUXILIARES DE MOVIMIENTO ===
 local antiGrav = nil
 local function getMoveVector()
     local PlayerModule = LP.PlayerScripts:FindFirstChild("PlayerModule")
@@ -441,7 +455,6 @@ local function getMoveVector()
     return Vector3.new(0,0,0)
 end
 
--- === LOOPS DE FÍSICA Y VISUALES ===
 local function isVisible(part, char)
     if not Settings.VisibleCheck then return true end
     local params = RaycastParams.new(); params.FilterType = Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances = {LP.Character, char}
@@ -449,11 +462,14 @@ local function isVisible(part, char)
 end
 
 RunService.RenderStepped:Connect(function()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+
     if spectateActive and targetPlayer and targetPlayer.Character then
         local tHum = targetPlayer.Character:FindFirstChild("Humanoid")
         if tHum then Camera.CameraType = Enum.CameraType.Custom Camera.CameraSubject = tHum end
     end
-    
+
     if not Running then return end
     updateFOVCircle()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
@@ -467,24 +483,194 @@ RunService.RenderStepped:Connect(function()
             local mag = (part.Position - LP.Character.HumanoidRootPart.Position).Magnitude
             local isAlly = (p.Team == LP.Team) or (p.TeamColor == LP.TeamColor)
             local isEnemy = not Settings.TeamCheck or not isAlly
-            
+
             if (isEnemy or Settings.ShowAliados) and mag <= Settings.MaxDistance then
                 local color = (p == CurrentTarget) and Color3.new(1,1,0) or ((not Settings.TeamCheck) and Color3.new(1,0,0) or (isAlly and Color3.new(0,1,0) or Color3.new(1,0,0)))
-                
-                if Settings.ESP_Names and onscreen then
-                    if not nms[p] then nms[p] = Drawing.new("Text") nms[p].Center, nms[p].Outline = true, true end
-                    nms[p].Visible, nms[p].Color, nms[p].Text, nms[p].Position = true, color, p.Name, Vector2.new(pos.X, pos.Y - 25)
-                elseif nms[p] then nms[p].Visible = false end
-                
-                if Settings.ESP_Lines and onscreen then
-                    if not lns[p] then lns[p] = Drawing.new("Line") end
-                    lns[p].Visible, lns[p].Color, lns[p].From, lns[p].To = true, color, Vector2.new(center.X, Camera.ViewportSize.Y), Vector2.new(pos.X, pos.Y)
-                elseif lns[p] then lns[p].Visible = false end
-                
+
+                -- GESTIÓN SEGURA DE HIGHLIGHT (Destruye al apagar para evitar bucles de Delta)
+                if Settings.ESP_Highlight then
+                    if not highlightsTbl[p] or not highlightsTbl[p].Parent then
+                        pcall(function()
+                            local h = Instance.new("Highlight")
+                            h.Name = "ESP_HL_" .. p.Name
+                            h.FillTransparency = 1
+                            h.OutlineTransparency = 0
+                            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            h.Parent = CoreGui
+                            highlightsTbl[p] = h
+                        end)
+                    end
+                    if highlightsTbl[p] then
+                        pcall(function()
+                            highlightsTbl[p].Enabled = true
+                            highlightsTbl[p].OutlineColor = color
+                            highlightsTbl[p].Adornee = char
+                        end)
+                    end
+                else
+                    if highlightsTbl[p] then
+                        pcall(function() highlightsTbl[p]:Destroy() end)
+                        highlightsTbl[p] = nil
+                    end
+                end
+
+                -- GESTIÓN SEGURA DE CHAMS (Destruye al apagar para evitar bloqueos)
                 if Settings.ESP_Chams then
-                    if not chams[p] then chams[p] = Instance.new("Highlight", CoreGui) end
-                    chams[p].Adornee, chams[p].Enabled, chams[p].FillColor = char, true, color
-                elseif chams[p] then chams[p].Enabled = false end
+                    if not chamsTbl[p] or not chamsTbl[p].Parent then
+                        pcall(function()
+                            local c = Instance.new("Highlight")
+                            c.Name = "ESP_CH_" .. p.Name
+                            c.FillTransparency = 0.5
+                            c.OutlineTransparency = 1
+                            c.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            c.Parent = CoreGui
+                            chamsTbl[p] = c
+                        end)
+                    end
+                    if chamsTbl[p] then
+                        pcall(function()
+                            chamsTbl[p].Enabled = true
+                            chamsTbl[p].FillColor = color
+                            chamsTbl[p].Adornee = char
+                        end)
+                    end
+                else
+                    if chamsTbl[p] then
+                        pcall(function() chamsTbl[p]:Destroy() end)
+                        chamsTbl[p] = nil
+                    end
+                end
+
+                local head = char:FindFirstChild("Head")
+                local root = char:FindFirstChild("HumanoidRootPart")
+                
+                if head and root and onscreen then
+                    local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 1.5, 0))
+                    local bottomPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3.5, 0))
+                    local boxHeight = bottomPos.Y - headPos.Y
+                    local boxWidth = boxHeight / 2
+
+                    if Settings.ESP_Names then
+                        if not nms[p] then 
+                            local txt = Instance.new("TextLabel", espGui)
+                            txt.BackgroundTransparency = 1
+                            txt.Font = Enum.Font.GothamBold
+                            txt.TextSize = 13
+                            txt.TextStrokeTransparency = 0
+                            txt.AnchorPoint = Vector2.new(0.5, 1)
+                            txt.Size = UDim2.new(0, 150, 0, 20)
+                            nms[p] = txt
+                        end
+                        nms[p].Visible = true
+                        nms[p].TextColor3 = color
+                        nms[p].Text = p.Name
+                        nms[p].Position = UDim2.new(0, pos.X, 0, headPos.Y - 5)
+                    elseif nms[p] then 
+                        nms[p].Visible = false
+                    end
+
+                    if Settings.ESP_Distance then
+                        if not distLbls[p] then
+                            local lbl = Instance.new("TextLabel", espGui)
+                            lbl.BackgroundTransparency = 1
+                            lbl.Font = Enum.Font.GothamBold
+                            lbl.TextSize = 11
+                            lbl.TextStrokeTransparency = 0
+                            lbl.AnchorPoint = Vector2.new(0.5, 0)
+                            lbl.Size = UDim2.new(0, 100, 0, 15)
+                            distLbls[p] = lbl
+                        end
+                        if distLbls[p] then
+                            pcall(function()
+                                distLbls[p].Visible = true
+                                distLbls[p].TextColor3 = Color3.new(0.8, 0.8, 0.8)
+                                distLbls[p].Text = "[" .. math.floor(mag * 0.28) .. "m]"
+                                distLbls[p].Position = UDim2.new(0, pos.X, 0, bottomPos.Y + 2)
+                            end)
+                        end
+                    elseif distLbls[p] then
+                        pcall(function() distLbls[p].Visible = false end)
+                    end
+
+                    if Settings.ESP_Health then
+                        local hp = char.Humanoid.Health
+                        local maxHp = char.Humanoid.MaxHealth
+                        local hpPct = math.clamp(hp / maxHp, 0, 1)
+                        
+                        if not healthBgs[p] then
+                            local bg = Instance.new("Frame", espGui)
+                            bg.BackgroundColor3 = Color3.new(0,0,0)
+                            bg.BorderSizePixel = 0
+                            bg.AnchorPoint = Vector2.new(1, 0)
+                            
+                            local fill = Instance.new("Frame", bg)
+                            fill.BorderSizePixel = 0
+                            fill.AnchorPoint = Vector2.new(0, 1)
+                            fill.Position = UDim2.new(0, 0, 1, 0)
+                            
+                            local txt = Instance.new("TextLabel", espGui)
+                            txt.BackgroundTransparency = 1
+                            txt.Font = Enum.Font.GothamBold
+                            txt.TextSize = 10
+                            txt.TextStrokeTransparency = 0
+                            txt.AnchorPoint = Vector2.new(1, 0.5)
+                            
+                            healthBgs[p] = bg
+                            healthFills[p] = fill
+                            healthTxts[p] = txt
+                        end
+                        
+                        if healthBgs[p] then
+                            pcall(function()
+                                healthBgs[p].Visible = true
+                                healthTxts[p].Visible = true
+                                
+                                local bHeight = math.max(10, boxHeight)
+                                healthBgs[p].Size = UDim2.new(0, 3, 0, bHeight)
+                                healthBgs[p].Position = UDim2.new(0, headPos.X - (boxWidth/2) - 4, 0, headPos.Y)
+                                
+                                healthFills[p].Size = UDim2.new(1, 0, hpPct, 0)
+                                healthFills[p].BackgroundColor3 = Color3.new(1 - hpPct, hpPct, 0)
+                                
+                                healthTxts[p].Text = tostring(math.floor(hp))
+                                healthTxts[p].TextColor3 = Color3.new(1 - hpPct, hpPct, 0)
+                                healthTxts[p].Position = UDim2.new(0, headPos.X - (boxWidth/2) - 9, 0, headPos.Y + (bHeight * (1 - hpPct)))
+                            end)
+                        end
+                    elseif healthBgs[p] then
+                        pcall(function() 
+                            healthBgs[p].Visible = false
+                            healthTxts[p].Visible = false 
+                        end)
+                    end
+                else
+                    if nms[p] then nms[p].Visible = false end
+                    if distLbls[p] then distLbls[p].Visible = false end
+                    if healthBgs[p] then healthBgs[p].Visible = false healthTxts[p].Visible = false end
+                end
+
+                if Settings.ESP_Lines and onscreen then
+                    if not lns[p] then 
+                        local line = Instance.new("Frame", espGui)
+                        line.BorderSizePixel = 0
+                        line.AnchorPoint = Vector2.new(0.5, 0.5)
+                        lns[p] = line
+                    end
+                    lns[p].Visible = true
+                    lns[p].BackgroundColor3 = color
+                    
+                    local startPos = Vector2.new(center.X, Camera.ViewportSize.Y)
+                    local endPos = Vector2.new(pos.X, pos.Y)
+                    local distance = (startPos - endPos).Magnitude
+                    local midPoint = (startPos + endPos) / 2
+                    local angle = math.atan2(endPos.Y - startPos.Y, endPos.X - startPos.X)
+                    
+                    lns[p].Size = UDim2.new(0, distance, 0, 1.5)
+                    lns[p].Position = UDim2.new(0, midPoint.X, 0, midPoint.Y)
+                    lns[p].Rotation = math.deg(angle)
+                elseif lns[p] then 
+                    lns[p].Visible = false
+                end
 
                 if isEnemy then
                     local sDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
@@ -493,26 +679,32 @@ RunService.RenderStepped:Connect(function()
                         if val < lastVal then lastVal, potTarget = val, p end
                     end
                 end
-            else hideVisuals(p) end
-        else hideVisuals(p) end
+            else 
+                hideVisuals(p) 
+                if highlightsTbl[p] then pcall(function() highlightsTbl[p]:Destroy() end) highlightsTbl[p] = nil end
+                if chamsTbl[p] then pcall(function() chamsTbl[p]:Destroy() end) chamsTbl[p] = nil end
+            end
+        else 
+            hideVisuals(p) 
+            if highlightsTbl[p] then pcall(function() highlightsTbl[p]:Destroy() end) highlightsTbl[p] = nil end
+            if chamsTbl[p] then pcall(function() chamsTbl[p]:Destroy() end) chamsTbl[p] = nil end
+        end
     end
 
     if CurrentTarget ~= potTarget and CurrentTarget then pcall(function() CurrentTarget.Character.Head.Anchored = false end) end
     CurrentTarget = potTarget
 
-    -- AIMBOT Y AUTO DISPARO INTEGRADO
     if CurrentTarget and Settings.Aimbot then
         local char = CurrentTarget.Character
         local targetPos = char[Settings.AimPart].Position
         local lerpAlpha = Settings.Smoothing == 0 and 1 or (1 - (Settings.Smoothing / 10))
         Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, targetPos), lerpAlpha)
-        
+
         if Settings.VentajaEnabled then
             local function movePart(part) if part and part:IsA("BasePart") then part.Anchored = true part.CanCollide = false part.CFrame = LP.Character.HumanoidRootPart.CFrame * CFrame.new(Settings.OffX, Settings.OffY, Settings.OffZ) end end
             pcall(function() if Settings.VentajaTarget == "Cabeza" then movePart(char:FindFirstChild("Head")) elseif Settings.VentajaTarget == "Torso" then movePart(char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")) elseif Settings.VentajaTarget == "Todo" then for _, v in pairs(char:GetChildren()) do movePart(v) end end end)
         end
-        
-        -- LÓGICA AUTO DISPARO CONDICIONADO AL OBJETIVO
+
         local isTargetVisible = isVisible(char[Settings.AimPart], char)
         if Settings.AutoShoot and Settings.TouchX > 0 and isTargetVisible then
             if Settings.TouchMode == "CLICK" then
@@ -531,24 +723,21 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         else
-            -- Soltar en caso de HOLD si el enemigo se oculta
             if isHolding then
                 pcall(function() VIM:SendTouchEvent(touchId, 2, Settings.TouchX, Settings.TouchY) end)
                 isHolding = false
             end
         end
     else
-        -- Soltar disparo en caso de perder el target por completo o apagar el aimbot
         if isHolding then
             pcall(function() VIM:SendTouchEvent(touchId, 2, Settings.TouchX, Settings.TouchY) end)
             isHolding = false
         end
     end
-    
-    -- LÓGICA TELEKILL Y FLY
+
     local char = LP.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    
+
     if root then
         if Settings.Telekill and CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("HumanoidRootPart") then
             root.Velocity = Vector3.zero
@@ -611,7 +800,7 @@ RunService.Heartbeat:Connect(function()
     if not targetPlayer or not targetPlayer.Character then return end
     local char, tChar = LP.Character, targetPlayer.Character
     local root, tRoot = char and char:FindFirstChild("HumanoidRootPart"), tChar:FindFirstChild("HumanoidRootPart")
-    
+
     if root and tRoot and not root.Anchored then
         local t = tick()
         if flingActive then
