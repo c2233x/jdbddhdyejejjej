@@ -58,7 +58,7 @@ local targetPlayer = nil
 local bangActive, flingActive, spectateActive = false, false, false
 local lastPos = nil 
 local bangModes = {"ESPALDA", "CABEZA", "CABEZA ALTO", "PISO (ESPALDA)"}
-local flingModes = {"GHOST", "TORNADO", "MISIL", "DEBAJO"}
+local flingModes = {"GHOST", "TORNADO", "MISIL", "DEBAJO", "FLING V2"}
 local modeIndex, flingModeIndex = 1, 1
 local ignoreTeam = false
 local bangSpeed, bangTilt = 35, 35 
@@ -103,42 +103,7 @@ local function showNotification(message, screenGuiParent)
     end)
 end
 
--- === SISTEMA TOUCH FLING ===
-local TouchFlingSystem = {Active = false, Connection = nil}
-
-function TouchFlingSystem:Start()
-    if self.Active then return end
-    self.Active = true
-    local movel = 0.1
-    
-    self.Connection = RunService.Heartbeat:Connect(function()
-        if not Settings.TouchFlingEnabled then self:Stop() return end
-        local character = LP.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        
-        if hrp then
-            local currentVel = hrp.Velocity
-            hrp.Velocity = currentVel * 10000 + Vector3.new(0, 10000, 0)
-            RunService.RenderStepped:Wait()
-            hrp.Velocity = currentVel
-            RunService.Stepped:Wait()
-            hrp.Velocity = currentVel + Vector3.new(0, movel, 0)
-            movel = -movel
-        end
-    end)
-end
-
-function TouchFlingSystem:Stop()
-    self.Active = false
-    if self.Connection then self.Connection:Disconnect(); self.Connection = nil end
-end
-
-function TouchFlingSystem:Toggle(state)
-    Settings.TouchFlingEnabled = state
-    if state then self:Start() else self:Stop() end
-end
-
--- === SISTEMA INVISIBILITY (BitingTheDust Adapted) ===
+-- === SISTEMA INVISIBILITY ===
 local InvisibilitySystem = {
     FakeCharacter = nil,
     RealCharacter = nil,
@@ -173,14 +138,12 @@ function InvisibilitySystem:Setup()
         end
     end
 
-    -- Transparencia
     for _, v in pairs(self.FakeCharacter:GetDescendants()) do
         if v:IsA("BasePart") then v.Transparency = 0.7 end
     end
 
     self.PseudoAnchor = self.FakeCharacter:FindFirstChild("HumanoidRootPart")
 
-    -- Muerte
     local hum = self.RealCharacter:FindFirstChildOfClass("Humanoid")
     if hum then
         table.insert(self.Connections, hum.Died:Connect(function()
@@ -242,9 +205,46 @@ end
 
 RunService.RenderStepped:Connect(function()
     if InvisibilitySystem.PseudoAnchor and InvisibilitySystem.Part then
-        InvisibilitySystem.PseudoAnchor.CFrame = InvisibilitySystem.Part.CFrame * CFrame.new(0, 5, 0)
+        if not (flingActive and flingModes[flingModeIndex] == "FLING V2") then
+            InvisibilitySystem.PseudoAnchor.CFrame = InvisibilitySystem.Part.CFrame * CFrame.new(0, 5, 0)
+        end
     end
 end)
+
+-- === SISTEMA TOUCH FLING ===
+local TouchFlingSystem = {Active = false, Connection = nil}
+
+function TouchFlingSystem:Start()
+    if self.Active then return end
+    self.Active = true
+    local movel = 0.1
+    
+    self.Connection = RunService.Heartbeat:Connect(function()
+        if not Settings.TouchFlingEnabled and not (flingActive and flingModes[flingModeIndex] == "FLING V2") then self:Stop() return end
+        local character = (InvisibilitySystem.IsInvisible and InvisibilitySystem.RealCharacter) or LP.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        
+        if hrp then
+            local currentVel = hrp.Velocity
+            hrp.Velocity = currentVel * 10000 + Vector3.new(0, 10000, 0)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = currentVel
+            RunService.Stepped:Wait()
+            hrp.Velocity = currentVel + Vector3.new(0, movel, 0)
+            movel = -movel
+        end
+    end)
+end
+
+function TouchFlingSystem:Stop()
+    self.Active = false
+    if self.Connection then self.Connection:Disconnect(); self.Connection = nil end
+end
+
+function TouchFlingSystem:Toggle(state)
+    Settings.TouchFlingEnabled = state
+    if state then self:Start() else self:Stop() end
+end
 
 -- === FUNCIONES DE LIMPIEZA Y VISUALES ===
 local function removeVisuals(p)
@@ -487,6 +487,11 @@ local function teleportToTarget()
 end
 
 local function stopAttack()
+    if flingActive and flingModes[flingModeIndex] == "FLING V2" then
+        TouchFlingSystem:Toggle(false)
+        InvisibilitySystem:Toggle(false)
+    end
+
     local char = LP.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
@@ -524,10 +529,32 @@ local function openTarget(p)
     createRow("Espectar", pages["SALA_OPTS"], true, nil, spectateActive, function(v) spectateActive = v if not v then resetCamera() end end)
     createRow("Teletransportar", pages["SALA_OPTS"], false, nil, nil, teleportToTarget, true, true)
 
-    createSub("Modo Fling", flingModes, nil, flingModes[flingModeIndex], pages["SALA_OPTS"], function(i) flingModeIndex = i end)
-    createRow("Activar Fling", pages["SALA_OPTS"], true, nil, flingActive, function(v) 
-        if v then lastPos = LP.Character.HumanoidRootPart.CFrame; flingActive, bangActive = true, false else stopAttack() end 
+    local flingBtn
+    createSub("Modo Fling", flingModes, nil, flingModes[flingModeIndex], pages["SALA_OPTS"], function(i) 
+        flingModeIndex = i 
+        if flingBtn then
+            if flingModes[flingModeIndex] == "FLING V2" then
+                flingBtn.TextLabel.Text = "Activar Fling V2"
+            else
+                flingBtn.TextLabel.Text = "Activar Fling"
+            end
+        end
     end)
+
+    local initialFlingText = (flingModes[flingModeIndex] == "FLING V2") and "Activar Fling V2" or "Activar Fling"
+    flingBtn = createRow(initialFlingText, pages["SALA_OPTS"], true, nil, flingActive, function(v) 
+        if v then 
+            lastPos = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") and LP.Character.HumanoidRootPart.CFrame
+            flingActive, bangActive = true, false 
+            if flingModes[flingModeIndex] == "FLING V2" then
+                InvisibilitySystem:Toggle(true)
+                TouchFlingSystem:Toggle(true)
+            end
+        else 
+            stopAttack() 
+        end 
+    end)
+
     createSlider("Fling Power", 1000, 500000, nil, flingRot, pages["SALA_OPTS"], false, function(v) flingRot = v end)
 
     createSub("Modo Bang", bangModes, nil, bangModes[modeIndex], pages["SALA_OPTS"], function(i) modeIndex = i end)
@@ -576,7 +603,7 @@ createSub("Objetivo", {"Head", "HumanoidRootPart", "UpperTorso"}, Settings, "Aim
 createSlider("Radio FOV", 10, 800, Settings, "FOV", pages["AIM"], false)
 createSlider("Suavidad Aim", 0, 10, Settings, "Smoothing", pages["AIM"], false)
 
--- Pestaña VENTAJA (Incluye Telekill, Touch Fling e Invisibility)
+-- Pestaña VENTAJA
 createRow("Activar Ventaja", pages["VENTAJA"], true, Settings, "VentajaEnabled")
 createSub("Traer Parte", {"Cabeza", "Torso", "Todo"}, Settings, "VentajaTarget", pages["VENTAJA"])
 
@@ -605,7 +632,6 @@ createSlider("Offset Y", -10, 10, Settings, "OffY", pages["VENTAJA"], true)
 createSlider("Offset Z", -10, 10, Settings, "OffZ", pages["VENTAJA"], true)
 createRow("Telekill (Al Apuntado)", pages["VENTAJA"], true, Settings, "Telekill")
 
--- Nuevas adiciones integradas limpiamente en Ventaja:
 createRow("Touch Fling", pages["VENTAJA"], true, Settings, "TouchFlingEnabled", function(v)
     TouchFlingSystem:Toggle(v)
 end)
@@ -989,7 +1015,14 @@ RunService.Heartbeat:Connect(function()
     local char, tChar = LP.Character, targetPlayer.Character
     local root, tRoot = char and char:FindFirstChild("HumanoidRootPart"), tChar:FindFirstChild("HumanoidRootPart")
 
-    if root and tRoot and not root.Anchored then
+    if flingActive and flingModes[flingModeIndex] == "FLING V2" then
+        local realChar = InvisibilitySystem.RealCharacter or LP.Character
+        local realRoot = realChar and realChar:FindFirstChild("HumanoidRootPart")
+        if realRoot and tRoot then
+            local t = tick()
+            realRoot.CFrame = tRoot.CFrame * CFrame.new(math.sin(t*50)*1.5, 0, math.cos(t*50)*1.5)
+        end
+    elseif root and tRoot and not root.Anchored then
         local t = tick()
         if flingActive then
             local bf = root:FindFirstChild("FlingForce") or Instance.new("BodyAngularVelocity", root)
@@ -1015,4 +1048,5 @@ end)
 task.spawn(function()
     task.wait(0.6)
     showNotification("c2233")
-end) 
+end)
+  
